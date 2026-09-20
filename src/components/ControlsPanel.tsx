@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ElementType } from 'react';
 import {
   Play, Pause, RotateCcw, LocateFixed, PanelRightClose, PanelRightOpen,
   ZoomIn, ZoomOut, Globe2, Contrast, Orbit, Route, Radar, Sparkles,
@@ -12,12 +12,11 @@ function toLocalInputValue(date: Date): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
-const LAYER_ICONS: Record<keyof LayerToggles, React.ElementType> = {
+const LAYER_ICONS: Record<keyof LayerToggles, ElementType> = {
   land: Globe2,
   terminator: Contrast,
   tropics: Orbit,
   meridians: Route,
-  meridians24: Route,
   equatorialGrid: Radar,
   mansions: Sparkles,
   ecliptic: CircleDot,
@@ -32,7 +31,6 @@ const LAYER_TITLES: Record<keyof LayerToggles, string> = {
   terminator: 'ظل الليل والنهار',
   tropics: 'المدارات الثلاثة',
   meridians: 'خطوط الطول',
-  meridians24: '24 خط طول',
   equatorialGrid: 'الشبكة الاستوائية',
   mansions: 'منازل القمر',
   ecliptic: 'خط البروج',
@@ -48,7 +46,6 @@ const LAYER_CAPTIONS: Record<keyof LayerToggles, string> = {
   terminator: 'ظل',
   tropics: 'مدارات',
   meridians: 'طول',
-  meridians24: '24',
   equatorialGrid: 'شبكة',
   mansions: 'منازل',
   ecliptic: 'بروج',
@@ -179,14 +176,6 @@ export function ControlsPanel() {
                 </button>
               );
             })}
-            <button
-              className={`icon-btn layer-btn ${layers.meridians24 ? 'active' : ''}`}
-              title="24 خط طول بدل 8"
-              onClick={() => toggleLayer('meridians24')}
-            >
-              <span className="mini-num">24</span>
-              <span className="layer-caption">خط طول</span>
-            </button>
           </div>
 
           <hr />
