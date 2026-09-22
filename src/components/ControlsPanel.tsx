@@ -1,8 +1,7 @@
-import { useState, type ElementType } from 'react';
+import { useState, type CSSProperties, type ElementType } from 'react';
 import {
-  Play, Pause, RotateCcw, LocateFixed, PanelRightClose, PanelRightOpen,
-  ZoomIn, ZoomOut, Globe2, Contrast, Orbit, Route, Radar, Sparkles,
-  CircleDot, MapPinned, Tag, X, Star, Disc, Compass, RefreshCw,
+  Play, Pause, RotateCcw, LocateFixed, MapPinned, Layers, Compass,
+  Globe2, Contrast, Orbit, Route, Radar, Sparkles, CircleDot, Star, Disc, Tag, X, ChevronDown,
 } from 'lucide-react';
 import { SPEED_LABELS_AR, useSimulationStore, type LayerToggles } from '../state/store';
 import { ZODIAC_ORDER, ZODIAC_SYMBOLS, type ZodiacKey } from '../core/zodiac';
@@ -40,7 +39,6 @@ const LAYER_TITLES: Record<keyof LayerToggles, string> = {
   observerMarker: 'موقعي',
 };
 
-// تسمية قصيرة جداً تحت كل أيقونة، حتى تكون واضحة دون الحاجة للتحويم (خصوصاً على الموبايل)
 const LAYER_CAPTIONS: Record<keyof LayerToggles, string> = {
   land: 'أرض',
   terminator: 'ظل',
@@ -60,146 +58,187 @@ const MAIN_LAYER_KEYS: (keyof LayerToggles)[] = [
   'ecliptic', 'mansions', 'stars', 'planets', 'labels', 'observerMarker',
 ];
 
+type SectionKey = 'observer' | 'layers' | 'zodiac';
+
+const SECTIONS: { key: SectionKey; title: string; icon: ElementType }[] = [
+  { key: 'observer', title: 'موقع المراقب', icon: MapPinned },
+  { key: 'layers', title: 'طبقات السماء', icon: Layers },
+  { key: 'zodiac', title: 'عزل الأبراج', icon: Compass },
+];
+
 export function ControlsPanel() {
-  const [collapsed, setCollapsed] = useState(false);
+  // كل قسم يُفتح ويُغلق باستقلالية — أكورديون واحد، بلا تمييز بين الجوال والحاسوب
+  const [open, setOpen] = useState<Set<SectionKey>>(new Set());
+
   const {
-    date, isPlaying, speedIndex, zoomScale, observer, layers, isolatedZodiac,
-    sceneRotationDeg,
-    setDate, togglePlay, resetToNow, setSpeedIndex, setZoom, setObserver,
-    toggleLayer, setIsolatedZodiac, setSceneRotation, resetSceneRotation,
+    date, isPlaying, speedIndex, observer, layers, isolatedZodiac,
+    setDate, togglePlay, resetToNow, setSpeedIndex, setObserver,
+    toggleLayer, setIsolatedZodiac,
   } = useSimulationStore();
 
+  function toggleSection(key: SectionKey) {
+    setOpen((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  const speedPercent = (speedIndex / 6) * 100;
+
   return (
-    <div className={`controls-panel ${collapsed ? 'collapsed' : ''}`}>
-      <button className="panel-toggle" onClick={() => setCollapsed((c) => !c)} title="لوحة التحكم">
-        {collapsed ? <PanelRightOpen size={18} /> : <PanelRightClose size={18} />}
-      </button>
-
-      {!collapsed && (
-        <div className="panel-body">
-          {/* الوقت والتشغيل */}
-          <div className="row">
-            <input
-              type="datetime-local"
-              className="time-input"
-              value={toLocalInputValue(date)}
-              onChange={(e) => e.target.value && setDate(new Date(e.target.value))}
-            />
-          </div>
-
-          <div className="row icon-row">
-            <button className={`icon-btn ${isPlaying ? 'active' : ''}`} onClick={togglePlay} title="تشغيل/إيقاف">
-              {isPlaying ? <Pause size={18} /> : <Play size={18} />}
-            </button>
-            <button className="icon-btn" onClick={resetToNow} title="الوقت الحالي">
-              <RotateCcw size={18} />
-            </button>
-            <input
-              type="range" min={0} max={6} step={1} value={speedIndex}
-              onChange={(e) => setSpeedIndex(Number(e.target.value))}
-              className="slider"
-              title={SPEED_LABELS_AR[speedIndex]}
-            />
-            <span className="mini-label">{SPEED_LABELS_AR[speedIndex]}</span>
-          </div>
-
-          <div className="row icon-row">
-            <ZoomOut size={16} className="dim-icon" />
-            <input
-              type="range" min={0.5} max={6} step={0.1} value={zoomScale}
-              onChange={(e) => setZoom(Number(e.target.value))}
-              className="slider"
-            />
-            <ZoomIn size={16} className="dim-icon" />
-            <span className="mini-label">{zoomScale.toFixed(1)}x</span>
-          </div>
-
-          {/* تدوير المشهد الكامل (كل الطبقات معاً) */}
-          <div className="row icon-row">
-            <Compass size={16} className="dim-icon" />
-            <input
-              type="range" min={0} max={359} step={1} value={sceneRotationDeg}
-              onChange={(e) => setSceneRotation(Number(e.target.value))}
-              className="slider"
-              title="تدوير المشهد بالكامل"
-            />
-            <span className="mini-label">{Math.round(sceneRotationDeg)}°</span>
-            <button className="icon-btn" onClick={resetSceneRotation} title="تصفير الدوران">
-              <RefreshCw size={16} />
-            </button>
-          </div>
-
-          <hr />
-
-          {/* موقع المراقب */}
-          <div className="row icon-row">
-            <MapPinned size={16} className="dim-icon" />
-            <input
-              type="number" step={0.01} value={observer.latitudeDeg}
-              onChange={(e) => setObserver({ latitudeDeg: Number(e.target.value) })}
-              className="coord-input" title="خط العرض"
-            />
-            <input
-              type="number" step={0.01} value={observer.longitudeDeg}
-              onChange={(e) => setObserver({ longitudeDeg: Number(e.target.value) })}
-              className="coord-input" title="خط الطول"
-            />
-            <button
-              className="icon-btn"
-              title="موقعي الحالي"
-              onClick={() => {
-                if (!navigator.geolocation) return;
-                navigator.geolocation.getCurrentPosition((pos) => {
-                  setObserver({ latitudeDeg: pos.coords.latitude, longitudeDeg: pos.coords.longitude });
-                });
-              }}
-            >
-              <LocateFixed size={18} />
-            </button>
-          </div>
-
-          <hr />
-
-          {/* الطبقات: أيقونة + تعليق قصير جداً تحت كل زر */}
-          <div className="layers-grid">
-            {MAIN_LAYER_KEYS.map((key) => {
-              const Icon = LAYER_ICONS[key];
-              return (
-                <button
-                  key={key}
-                  className={`icon-btn layer-btn ${layers[key] ? 'active' : ''}`}
-                  title={LAYER_TITLES[key]}
-                  onClick={() => toggleLayer(key)}
-                >
-                  <Icon size={16} />
-                  <span className="layer-caption">{LAYER_CAPTIONS[key]}</span>
-                </button>
-              );
-            })}
-          </div>
-
-          <hr />
-
-          {/* عزل الأبراج الاثني عشر */}
-          <div className="zodiac-grid">
-            {ZODIAC_ORDER.map((z: ZodiacKey) => (
-              <button
-                key={z}
-                className={`zodiac-btn ${isolatedZodiac === z ? 'active' : ''}`}
-                title={z}
-                onClick={() => setIsolatedZodiac(isolatedZodiac === z ? null : z)}
-              >
-                {ZODIAC_SYMBOLS[z]}
-              </button>
-            ))}
-            {isolatedZodiac && (
-              <button className="icon-btn" title="إلغاء العزل" onClick={() => setIsolatedZodiac(null)}>
-                <X size={16} />
-              </button>
-            )}
-          </div>
+    <nav className="controls-panel" aria-label="لوحة تحكم المحاكي">
+      <div className="brand">
+        <span className="brand-mark"><Orbit size={20} /></span>
+        <div>
+          <div className="brand-title">نجم</div>
+          <div className="brand-sub">مِرصاد يقين الفلكي</div>
         </div>
-      )}
-    </div>
+      </div>
+
+      {/* الشريط الأساسي: يبقى ظاهراً دائماً */}
+      <div className="cp-primary">
+        <button
+          className="btn-icon btn-play"
+          onClick={togglePlay}
+          title={isPlaying ? 'إيقاف' : 'تشغيل'}
+          aria-pressed={isPlaying}
+        >
+          {isPlaying ? <Pause size={18} /> : <Play size={18} />}
+        </button>
+        <input
+          type="datetime-local"
+          className="datetime"
+          value={toLocalInputValue(date)}
+          onChange={(e) => e.target.value && setDate(new Date(e.target.value))}
+          aria-label="التاريخ والوقت"
+        />
+        <button className="btn-icon" onClick={resetToNow} title="الوقت الحالي">
+          <RotateCcw size={17} />
+        </button>
+      </div>
+
+      <div className="speed-row">
+        <span className="speed-label">السرعة</span>
+        <input
+          type="range"
+          min={0}
+          max={6}
+          step={1}
+          value={speedIndex}
+          onChange={(e) => setSpeedIndex(Number(e.target.value))}
+          className="slider"
+          style={{ '--p': `${speedPercent}%` } as CSSProperties}
+          aria-label="سرعة تسارع الزمن"
+        />
+        <span className="speed-chip">{SPEED_LABELS_AR[speedIndex]}</span>
+      </div>
+
+      {/* الأقسام الثانوية: تُفتح حسب رغبة المستخدم */}
+      <div className="acc">
+        {SECTIONS.map(({ key, title, icon: Icon }) => {
+          const isOpen = open.has(key);
+          return (
+            <div className="acc-item" data-open={isOpen} key={key}>
+              <button className="acc-head" onClick={() => toggleSection(key)} aria-expanded={isOpen}>
+                <Icon size={17} />
+                <span className="acc-title">{title}</span>
+                <ChevronDown size={16} className="chev" />
+              </button>
+
+              <div className="acc-body">
+                <div className="acc-clip">
+                  <div className="acc-content">
+                    {key === 'observer' && (
+                      <div className="field-group">
+                        <div className="coord-grid">
+                          <div className="field">
+                            <span className="field-label">خط العرض</span>
+                            <input
+                              type="number"
+                              step={0.01}
+                              value={observer.latitudeDeg}
+                              onChange={(e) => setObserver({ latitudeDeg: Number(e.target.value) })}
+                              className="coord-input"
+                            />
+                          </div>
+                          <div className="field">
+                            <span className="field-label">خط الطول</span>
+                            <input
+                              type="number"
+                              step={0.01}
+                              value={observer.longitudeDeg}
+                              onChange={(e) => setObserver({ longitudeDeg: Number(e.target.value) })}
+                              className="coord-input"
+                            />
+                          </div>
+                        </div>
+                        <button
+                          className="btn-wide"
+                          onClick={() => {
+                            if (!navigator.geolocation) return;
+                            navigator.geolocation.getCurrentPosition((pos) => {
+                              setObserver({ latitudeDeg: pos.coords.latitude, longitudeDeg: pos.coords.longitude });
+                            });
+                          }}
+                        >
+                          <LocateFixed size={16} />
+                          استخدام موقعي الحالي
+                        </button>
+                      </div>
+                    )}
+
+                    {key === 'layers' && (
+                      <div className="layers-grid">
+                        {MAIN_LAYER_KEYS.map((k) => {
+                          const LayerIcon = LAYER_ICONS[k];
+                          return (
+                            <button
+                              key={k}
+                              className="layer-tile"
+                              aria-pressed={layers[k]}
+                              title={LAYER_TITLES[k]}
+                              onClick={() => toggleLayer(k)}
+                            >
+                              <LayerIcon size={17} />
+                              <span>{LAYER_CAPTIONS[k]}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {key === 'zodiac' && (
+                      <div className="field-group">
+                        {isolatedZodiac && (
+                          <button className="btn-wide subtle" onClick={() => setIsolatedZodiac(null)}>
+                            <X size={14} />
+                            إلغاء عزل {isolatedZodiac}
+                          </button>
+                        )}
+                        <div className="zodiac-grid">
+                          {ZODIAC_ORDER.map((z: ZodiacKey) => (
+                            <button
+                              key={z}
+                              className="zodiac-btn"
+                              aria-pressed={isolatedZodiac === z}
+                              title={z}
+                              onClick={() => setIsolatedZodiac(isolatedZodiac === z ? null : z)}
+                            >
+                              {ZODIAC_SYMBOLS[z]}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </nav>
   );
 }

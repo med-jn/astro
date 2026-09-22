@@ -24,22 +24,25 @@ export function InfoCard({ output }: Props) {
   const moonIllum = Math.round((output.moon.phaseFraction ?? 0) * 100);
 
   return (
-    <div className="info-card">
+    <div className="info-card" aria-live="polite">
       <div className="info-row">
         <span className="badge badge-sun">☀</span>
-        <span>
+        <span className="info-label">منزلة الشمس</span>
+        <span className="info-value">
           {sunMansion?.nameAr} ({(sunMansion?.index ?? 0) + 1}) · ميل {fmtDeg(output.sun.equatorial.declinationDeg)}
         </span>
       </div>
       <div className="info-row">
         <span className="badge badge-moon">☾</span>
-        <span>
+        <span className="info-label">منزلة القمر</span>
+        <span className="info-value">
           {moonMansion?.nameAr} ({(moonMansion?.index ?? 0) + 1}) · إضاءة {moonIllum}%
         </span>
       </div>
       <div className="info-row">
         <span className="badge badge-time">⏱</span>
-        <span>الزمن النجمي بغرينتش: {(output.gmstDeg / 15).toFixed(2)}س</span>
+        <span className="info-label">الزمن النجمي</span>
+        <span className="info-value">بغرينتش {(output.gmstDeg / 15).toFixed(2)}س</span>
       </div>
     </div>
   );

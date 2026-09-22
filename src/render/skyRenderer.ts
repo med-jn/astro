@@ -1,7 +1,13 @@
 import * as Astronomy from 'astronomy-engine';
 import type { ObserverLocation, CelestialBodyState } from '../types/astro';
 import type { LayerToggles } from '../state/store';
-import { latLonToScreen, raDecToScreen, type PolarMapConfig, type ProjectedPoint2D } from '../core/projection';
+import {
+  latLonToScreen,
+  raDecToScreen,
+  computeOuterRadiusPx,
+  type PolarMapConfig,
+  type ProjectedPoint2D,
+} from '../core/projection';
 import { getSubsolarPoint, drawNightShading } from '../core/terminator';
 import { getAllLunarMansions, MANSION_SPAN_DEG } from '../core/mansions';
 import { eclipticLongitudeToEquatorial, getMeanObliquityDeg } from '../core/eclipticTransform';
@@ -27,6 +33,9 @@ export interface RenderInput {
   isolatedZodiac: ZodiacKey | null;
   calibration: MapCalibration | null;
   sceneRotationDeg?: number;
+  /** إزاحة التحريك (Pan) كنسبة من نصف قطر القبة الحالي — انظر تعريفها في store.ts */
+  panX?: number;
+  panY?: number;
 }
 
 /** نقطة قابلة "للتحويم عليها" لعرض بطاقة الاسم + الإحداثيات (+ وصف/صوت مستقبلاً) */
@@ -51,7 +60,6 @@ const TROPIC_OBLIQUITY = 23.4367;
 const SPACE_COLOR = '#000000';
 
 const ANGULAR_SIZE_VISUAL_BOOST = 16;
-const SUN_SIZE_SCALE = 0.82;
 const FALLBACK_SUN_ANGULAR_DEG = 0.533;
 const FALLBACK_MOON_ANGULAR_DEG = 0.518;
 
@@ -61,16 +69,24 @@ export function renderSky(
   height: number,
   input: RenderInput
 ): RenderOutput {
-  const { date, observer, zoomScale, layers, isolatedZodiac, calibration, sceneRotationDeg = 0 } = input;
+  const {
+    date, observer, zoomScale, layers, isolatedZodiac, calibration,
+    sceneRotationDeg = 0, panX = 0, panY = 0,
+  } = input;
   const time = Astronomy.MakeTime(date);
   const gmstDeg = getGMSTDeg(time);
   const obliquityDeg = getMeanObliquityDeg(time);
 
   const centerX = width / 2;
   const centerY = height / 2;
-  const outerRadiusPx = Math.min(width, height) * 0.46 * zoomScale;
+  const outerRadiusPx = computeOuterRadiusPx(width, height, zoomScale);
   const config: PolarMapConfig = { centerX, centerY, outerRadiusPx };
   const pxPerDeg = outerRadiusPx / 180;
+
+  // إزاحة التحريك بالبكسل — تُحفَظ هنا لاستخدامها مرتين: كترجمة فعلية على الكانفس أدناه،
+  // وكتصحيح لموضع بطاقات التحويم في collectHitTargets حتى تطابق ما يُرسَم فعلياً بدقة.
+  const panXpx = panX * outerRadiusPx;
+  const panYpx = panY * outerRadiusPx;
 
   const sun = getSunState(time, observer);
   const moon = getMoonState(time, observer);
@@ -79,9 +95,12 @@ export function renderSky(
   const sunGhaDeg = normalizeDeg(gmstDeg - sun.equatorial.rightAscensionHours * 15);
   const subsolar = getSubsolarPoint(sun.equatorial.declinationDeg, sunGhaDeg);
 
+  // الشمس والقمر: نفس الصيغة بالضبط لكليهما — نسبتهما الظاهرية الحقيقية (angularSizeDeg
+  // القادم من محرك الفلك) هي ما يقرر حجمهما النسبي، تماماً كما يراهما الراصد في السماء
+  // (وهو ما يفسّر إمكان حدوث كسوف كلي: قرصاهما شبه متطابقين زاوياً).
   const sunRadiusPx = Math.max(
     4,
-    ((sun.angularSizeDeg ?? FALLBACK_SUN_ANGULAR_DEG) / 2) * pxPerDeg * ANGULAR_SIZE_VISUAL_BOOST * SUN_SIZE_SCALE
+    ((sun.angularSizeDeg ?? FALLBACK_SUN_ANGULAR_DEG) / 2) * pxPerDeg * ANGULAR_SIZE_VISUAL_BOOST
   );
   const moonRadiusPx = Math.max(
     4,
@@ -101,6 +120,11 @@ export function renderSky(
   ctx.clip();
 
   ctx.save();
+  // التحريك (Pan) يُطبَّق أولاً في فضاء الشاشة الخام — قبل الدوران — فيبقى اتجاه السحب
+  // بديهياً دائماً (يمين المستخدم = يمين المحتوى) بصرف النظر عن زاوية دوران المشهد الحالية.
+  // خلفية الفضاء السوداء مرسومة أصلاً تحت كل شيء، فأي فراغ يكشفه التحريك عند الحواف
+  // يبدو "فضاءً" طبيعياً بلا أي قطع أو خط مرئي.
+  ctx.translate(panXpx, panYpx);
   ctx.translate(centerX, centerY);
   ctx.rotate((sceneRotationDeg * Math.PI) / 180);
   ctx.translate(-centerX, -centerY);
@@ -118,47 +142,48 @@ export function renderSky(
   }
 
   // --- 3. المدارات الثلاثة ---
-  if (layers.tropics) drawTropics(ctx, config, layers.labels);
+  if (layers.tropics) drawTropics(ctx, config, layers.labels, zoomScale);
 
   // --- 4. خطوط الطول الأرضية الثابتة (24 دائماً) ---
-  if (layers.meridians) drawMeridians(ctx, config, layers.labels);
+  if (layers.meridians) drawMeridians(ctx, config, layers.labels, zoomScale);
 
   // --- 5. الشبكة الإحداثية الكاملة (360 خط طول سماوي + دائرة ميل لكل درجة) ---
-  if (layers.equatorialGrid) drawEquatorialGrid(ctx, gmstDeg, config);
+  if (layers.equatorialGrid) drawEquatorialGrid(ctx, gmstDeg, config, zoomScale);
 
   // --- 6. خط البروج ---
-  if (layers.ecliptic) drawEclipticLine(ctx, obliquityDeg, gmstDeg, config);
+  if (layers.ecliptic) drawEclipticLine(ctx, obliquityDeg, gmstDeg, config, zoomScale);
 
   // --- 7. منازل القمر ---
-  if (layers.mansions) drawLunarMansions(ctx, obliquityDeg, gmstDeg, config, layers.labels);
+  if (layers.mansions) drawLunarMansions(ctx, obliquityDeg, gmstDeg, config, layers.labels, zoomScale);
 
   // --- 8. النجوم (مع عزل برج اختياري) ---
   if (layers.stars) drawStars(ctx, gmstDeg, config, layers.labels, zoomScale, isolatedZodiac);
-  if (isolatedZodiac) drawIsolatedZodiacLines(ctx, isolatedZodiac, gmstDeg, config);
+  if (isolatedZodiac) drawIsolatedZodiacLines(ctx, isolatedZodiac, gmstDeg, config, zoomScale);
 
   // --- 9. الكواكب ---
-  if (layers.planets) drawPlanets(ctx, planets, gmstDeg, config, layers.labels);
+  if (layers.planets) drawPlanets(ctx, planets, gmstDeg, config, layers.labels, zoomScale);
 
   // --- 10. الشمس والقمر ---
   drawSun(ctx, sunScreenP, sunRadiusPx);
   drawMoon(ctx, moon, moonScreenP, sunScreenP, moonRadiusPx);
 
   // --- 11. علامة موقع المراقب ---
-  if (layers.observerMarker) drawObserverMarker(ctx, observer, config, layers.labels);
+  if (layers.observerMarker) drawObserverMarker(ctx, observer, config, layers.labels, zoomScale);
 
   ctx.restore();
   ctx.restore();
 
   ctx.save();
   ctx.strokeStyle = 'rgba(226, 232, 240, 0.5)';
-  ctx.lineWidth = 3;
+  ctx.lineWidth = 3 * zoomScale;
   ctx.beginPath();
   ctx.arc(centerX, centerY, outerRadiusPx, 0, Math.PI * 2);
   ctx.stroke();
   ctx.restore();
 
   const hitTargets = collectHitTargets(
-    sun, sunScreenP, moon, moonScreenP, planets, gmstDeg, config, observer, layers.labels
+    sun, sunScreenP, moon, moonScreenP, planets, gmstDeg, config, observer, layers.labels,
+    sceneRotationDeg, panXpx, panYpx
   );
 
   return { sun, moon, planets, gmstDeg, hitTargets };
@@ -195,9 +220,9 @@ const TROPIC_STYLES: { lat: number; color: string; label: string }[] = [
   { lat: -TROPIC_OBLIQUITY, color: '#86efac', label: 'مدار الجدي' },
 ];
 
-function drawTropics(ctx: CanvasRenderingContext2D, config: PolarMapConfig, showLabels: boolean) {
+function drawTropics(ctx: CanvasRenderingContext2D, config: PolarMapConfig, showLabels: boolean, zoomScale: number) {
   ctx.save();
-  ctx.lineWidth = 2.2;
+  ctx.lineWidth = 2.2 * zoomScale;
   TROPIC_STYLES.forEach(({ lat, color, label }) => {
     const r = ((90 - lat) / 180) * config.outerRadiusPx;
     ctx.strokeStyle = color;
@@ -208,7 +233,7 @@ function drawTropics(ctx: CanvasRenderingContext2D, config: PolarMapConfig, show
     if (showLabels) {
       ctx.globalAlpha = 1;
       ctx.fillStyle = color;
-      ctx.font = 'bold 9px system-ui, sans-serif';
+      ctx.font = `bold ${9 * zoomScale}px system-ui, sans-serif`;
       ctx.textAlign = 'left';
       ctx.fillText(label, config.centerX + 4, config.centerY - r - 4);
     }
@@ -218,7 +243,7 @@ function drawTropics(ctx: CanvasRenderingContext2D, config: PolarMapConfig, show
 }
 
 /** خطوط الطول — مسار واحد مُجمَّع (بدل 24 استدعاء stroke منفصل) */
-function drawMeridians(ctx: CanvasRenderingContext2D, config: PolarMapConfig, showLabels: boolean) {
+function drawMeridians(ctx: CanvasRenderingContext2D, config: PolarMapConfig, showLabels: boolean, zoomScale: number) {
   const count = 24;
   const path = new Path2D();
   const labels: { x: number; y: number; text: string }[] = [];
@@ -234,11 +259,11 @@ function drawMeridians(ctx: CanvasRenderingContext2D, config: PolarMapConfig, sh
   }
   ctx.save();
   ctx.strokeStyle = 'rgba(203, 213, 225, 0.5)';
-  ctx.lineWidth = 1.6;
+  ctx.lineWidth = 1.6 * zoomScale;
   ctx.stroke(path);
   if (showLabels) {
     ctx.fillStyle = 'rgba(226, 232, 240, 0.8)';
-    ctx.font = '9px system-ui, sans-serif';
+    ctx.font = `${9 * zoomScale}px system-ui, sans-serif`;
     ctx.textAlign = 'center';
     labels.forEach((l) => ctx.fillText(l.text, l.x, l.y));
   }
@@ -247,7 +272,7 @@ function drawMeridians(ctx: CanvasRenderingContext2D, config: PolarMapConfig, sh
 
 /** شبكة إحداثيات سماوية كاملة: 360 خط طول + دائرة ميل لكل درجة — مسار واحد مُجمَّع
  * (بدل ~540 استدعاء stroke منفصل، وهو ما كان السبب الرئيسي في تقطيع الحركة). */
-function drawEquatorialGrid(ctx: CanvasRenderingContext2D, gmstDeg: number, config: PolarMapConfig) {
+function drawEquatorialGrid(ctx: CanvasRenderingContext2D, gmstDeg: number, config: PolarMapConfig, zoomScale: number) {
   const path = new Path2D();
   for (let raDeg = 0; raDeg < 360; raDeg += 1) {
     const raH = raDeg / 15;
@@ -262,7 +287,7 @@ function drawEquatorialGrid(ctx: CanvasRenderingContext2D, gmstDeg: number, conf
   }
   ctx.save();
   ctx.strokeStyle = 'rgba(255, 255, 255, 0.16)';
-  ctx.lineWidth = 0.5;
+  ctx.lineWidth = 0.5 * zoomScale;
   ctx.stroke(path);
   ctx.restore();
 }
@@ -271,11 +296,12 @@ function drawEclipticLine(
   ctx: CanvasRenderingContext2D,
   obliquityDeg: number,
   gmstDeg: number,
-  config: PolarMapConfig
+  config: PolarMapConfig,
+  zoomScale: number
 ) {
   ctx.save();
   ctx.strokeStyle = 'rgba(250, 204, 21, 0.55)';
-  ctx.lineWidth = 1.5;
+  ctx.lineWidth = 1.5 * zoomScale;
   ctx.beginPath();
   for (let lon = 0; lon <= 360; lon += 3) {
     const { raHours, decDeg } = eclipticLongitudeToEquatorial(lon, obliquityDeg);
@@ -296,7 +322,8 @@ function drawLunarMansions(
   obliquityDeg: number,
   gmstDeg: number,
   config: PolarMapConfig,
-  showLabels: boolean
+  showLabels: boolean,
+  zoomScale: number
 ) {
   if (!showLabels) return;
   const mansions = getAllLunarMansions();
@@ -306,7 +333,7 @@ function drawLunarMansions(
     const mid = eclipticLongitudeToEquatorial(midLon, obliquityDeg);
     const p = raDecToScreen(mid.raHours, mid.decDeg, gmstDeg, config);
     ctx.fillStyle = SEASON_COLORS[mansion.season];
-    ctx.font = 'bold 10px system-ui, sans-serif';
+    ctx.font = `bold ${10 * zoomScale}px system-ui, sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(mansion.nameAr, p.x, p.y);
@@ -330,7 +357,8 @@ function drawStars(
   for (const star of getLoadedStars()) {
     const p = raDecToScreen(star.ra, star.dec, gmstDeg, config);
     if (!p.visible) continue;
-    const r = getStarRadiusPx(star.mag);
+    // نصف قطر النجم يكبر/يصغر مع مستوى التكبير — بدل نقطة بحجم ثابت لا تتناسب مع بقية المشهد
+    const r = getStarRadiusPx(star.mag) * zoomScale;
     const color = getStarColor(star.spect);
     let path = colorGroups.get(color);
     if (!path) { path = new Path2D(); colorGroups.set(color, path); }
@@ -352,7 +380,7 @@ function drawStars(
   ctx.globalAlpha = 1;
 
   if (labelTargets.length) {
-    ctx.font = '10px system-ui, sans-serif';
+    ctx.font = `${10 * zoomScale}px system-ui, sans-serif`;
     ctx.fillStyle = 'rgba(226, 232, 240, 0.85)';
     labelTargets.forEach((t) => ctx.fillText(t.name, t.x + 6, t.y - 4));
   }
@@ -363,16 +391,17 @@ function drawIsolatedZodiacLines(
   ctx: CanvasRenderingContext2D,
   key: ZodiacKey,
   gmstDeg: number,
-  config: PolarMapConfig
+  config: PolarMapConfig,
+  zoomScale: number
 ) {
   const data = getLoadedZodiac()[key];
   if (!data) return;
   ctx.save();
   ctx.strokeStyle = '#facc15';
   ctx.fillStyle = '#fde047';
-  ctx.lineWidth = 2;
+  ctx.lineWidth = 2 * zoomScale;
   ctx.shadowColor = '#facc15';
-  ctx.shadowBlur = 6;
+  ctx.shadowBlur = 6 * zoomScale;
   data.segments.forEach((seg) => {
     ctx.beginPath();
     let started = false;
@@ -384,7 +413,7 @@ function drawIsolatedZodiacLines(
       ctx.save();
       ctx.shadowBlur = 0;
       ctx.beginPath();
-      ctx.arc(p.x, p.y, 2.6, 0, Math.PI * 2);
+      ctx.arc(p.x, p.y, 2.6 * zoomScale, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
     });
@@ -398,7 +427,8 @@ function drawPlanets(
   planets: { name: string; state: CelestialBodyState }[],
   gmstDeg: number,
   config: PolarMapConfig,
-  showLabels: boolean
+  showLabels: boolean,
+  zoomScale: number
 ) {
   ctx.save();
   planets.forEach(({ name, state }) => {
@@ -406,16 +436,18 @@ function drawPlanets(
     if (!p.visible) return;
     const color = PLANET_COLORS[name as keyof typeof PLANET_COLORS] ?? '#e2e8f0';
     const mag = state.magnitude ?? 2;
-    const r = Math.max(1.8, 3.4 - mag * 0.25);
+    // نقطة شبه ثابتة الحجم فلكياً (بلا قرص مرئي حقيقي للعين المجردة) — لكن تكبر/تصغر مع
+    // مستوى التكبير كبقية عناصر المشهد، والفروق بين الكواكب تبقى محكومة بلمعانها (mag)
+    const r = Math.max(1.8, 3.4 - mag * 0.25) * zoomScale;
     ctx.fillStyle = color;
     ctx.shadowColor = color;
-    ctx.shadowBlur = 6;
+    ctx.shadowBlur = 6 * zoomScale;
     ctx.beginPath();
     ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
     ctx.fill();
     ctx.shadowBlur = 0;
     if (showLabels) {
-      ctx.font = '10px system-ui, sans-serif';
+      ctx.font = `${10 * zoomScale}px system-ui, sans-serif`;
       ctx.fillStyle = color;
       ctx.fillText(PLANET_LABELS_AR[name as keyof typeof PLANET_LABELS_AR] ?? name, p.x + 7, p.y - 4);
     }
@@ -516,20 +548,21 @@ function drawObserverMarker(
   ctx: CanvasRenderingContext2D,
   observer: ObserverLocation,
   config: PolarMapConfig,
-  showLabels: boolean
+  showLabels: boolean,
+  zoomScale: number
 ) {
   const p = latLonToScreen(observer.latitudeDeg, observer.longitudeDeg, config);
   if (!p.visible) return;
   ctx.save();
   ctx.fillStyle = '#f87171';
   ctx.strokeStyle = '#ffffff';
-  ctx.lineWidth = 1.2;
+  ctx.lineWidth = 1.2 * zoomScale;
   ctx.beginPath();
-  ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
+  ctx.arc(p.x, p.y, 4 * zoomScale, 0, Math.PI * 2);
   ctx.fill();
   ctx.stroke();
   if (showLabels) {
-    ctx.font = '10px system-ui, sans-serif';
+    ctx.font = `${10 * zoomScale}px system-ui, sans-serif`;
     ctx.fillStyle = '#fca5a5';
     ctx.fillText('موقعي', p.x + 7, p.y + 3);
   }
@@ -537,6 +570,28 @@ function drawObserverMarker(
 }
 
 // ============================= بطاقات التحويم (الأسماء + سجل المحتوى) =============================
+
+/** يُحوّل نقطة "عالمية" (قبل الدوران والتحريك) إلى موضعها الحقيقي على الشاشة — يُطابق تماماً
+ * سلسلة ctx.translate/rotate المُطبَّقة فعلياً عند الرسم. بدون هذا التصحيح، كانت بطاقات
+ * التحويم (Tooltips) تُحسب بإحداثيات ما قبل الدوران فتُخطئ موضع الإصبع كلما دار المشهد —
+ * خلل كان موجوداً مسبقاً، أُصلح هنا بالتزامن مع إضافة التحريك الذي يحتاج نفس التصحيح. */
+function applySceneTransform(
+  p: ProjectedPoint2D,
+  cx: number,
+  cy: number,
+  rotationDeg: number,
+  panXpx: number,
+  panYpx: number
+): { x: number; y: number } {
+  const rad = (rotationDeg * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  const dx = p.x - cx;
+  const dy = p.y - cy;
+  const rx = dx * cos - dy * sin;
+  const ry = dx * sin + dy * cos;
+  return { x: cx + rx + panXpx, y: cy + ry + panYpx };
+}
 
 function collectHitTargets(
   sun: CelestialBodyState,
@@ -547,23 +602,31 @@ function collectHitTargets(
   gmstDeg: number,
   config: PolarMapConfig,
   observer: ObserverLocation,
-  showLabels: boolean
+  showLabels: boolean,
+  sceneRotationDeg: number,
+  panXpx: number,
+  panYpx: number
 ): HitTarget[] {
   const targets: HitTarget[] = [];
   if (!showLabels) return targets;
 
+  const project = (p: ProjectedPoint2D) =>
+    applySceneTransform(p, config.centerX, config.centerY, sceneRotationDeg, panXpx, panYpx);
+
   if (sunP.visible) {
     const content = getContent(getContentId('sun', 'sun'));
+    const screen = project(sunP);
     targets.push({
-      x: sunP.x, y: sunP.y, name: content?.nameAr ?? 'الشمس',
+      x: screen.x, y: screen.y, name: content?.nameAr ?? 'الشمس',
       detail: `ميل ${sun.equatorial.declinationDeg.toFixed(1)}° · م.م ${sun.equatorial.rightAscensionHours.toFixed(2)}س`,
       description: content?.description, audioUrl: content?.audioUrl,
     });
   }
   if (moonP.visible) {
     const content = getContent(getContentId('moon', 'moon'));
+    const screen = project(moonP);
     targets.push({
-      x: moonP.x, y: moonP.y, name: content?.nameAr ?? 'القمر',
+      x: screen.x, y: screen.y, name: content?.nameAr ?? 'القمر',
       detail: `إضاءة ${Math.round((moon.phaseFraction ?? 0) * 100)}% · ميل ${moon.equatorial.declinationDeg.toFixed(1)}°`,
       description: content?.description, audioUrl: content?.audioUrl,
     });
@@ -574,8 +637,9 @@ function collectHitTargets(
     if (!p.visible) return;
     const nameAr = PLANET_LABELS_AR[name as keyof typeof PLANET_LABELS_AR] ?? name;
     const content = getContent(getContentId('planet', name));
+    const screen = project(p);
     targets.push({
-      x: p.x, y: p.y, name: content?.nameAr ?? nameAr,
+      x: screen.x, y: screen.y, name: content?.nameAr ?? nameAr,
       detail: `ميل ${state.equatorial.declinationDeg.toFixed(1)}° · م.م ${state.equatorial.rightAscensionHours.toFixed(2)}س`,
       description: content?.description, audioUrl: content?.audioUrl,
     });
@@ -588,8 +652,9 @@ function collectHitTargets(
     const p = raDecToScreen(star.ra, star.dec, gmstDeg, config);
     if (!p.visible) continue;
     const content = getContent(getContentId('star', name));
+    const screen = project(p);
     targets.push({
-      x: p.x, y: p.y, name: content?.nameAr ?? name,
+      x: screen.x, y: screen.y, name: content?.nameAr ?? name,
       detail: `قدر ${star.mag.toFixed(1)} · ميل ${star.dec.toFixed(1)}°`,
       description: content?.description, audioUrl: content?.audioUrl,
     });
@@ -597,8 +662,9 @@ function collectHitTargets(
 
   const obsP = latLonToScreen(observer.latitudeDeg, observer.longitudeDeg, config);
   if (obsP.visible) {
+    const screen = project(obsP);
     targets.push({
-      x: obsP.x, y: obsP.y, name: 'موقعي',
+      x: screen.x, y: screen.y, name: 'موقعي',
       detail: `${observer.latitudeDeg.toFixed(2)}°, ${observer.longitudeDeg.toFixed(2)}°`,
     });
   }
