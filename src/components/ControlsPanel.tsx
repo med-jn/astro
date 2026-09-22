@@ -27,7 +27,7 @@ const LAYER_ICONS: Record<keyof LayerToggles, ElementType> = {
 
 const LAYER_TITLES: Record<keyof LayerToggles, string> = {
   land: 'الأرض',
-  terminator: 'ظل الليل والنهار',
+  terminator: 'الليل والنهار',
   tropics: 'المدارات الثلاثة',
   meridians: 'خطوط الطول',
   equatorialGrid: 'الشبكة الاستوائية',
@@ -41,7 +41,7 @@ const LAYER_TITLES: Record<keyof LayerToggles, string> = {
 
 const LAYER_CAPTIONS: Record<keyof LayerToggles, string> = {
   land: 'أرض',
-  terminator: 'ظل',
+  terminator: 'ليل',
   tropics: 'مدارات',
   meridians: 'طول',
   equatorialGrid: 'شبكة',
