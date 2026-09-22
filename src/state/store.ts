@@ -10,12 +10,10 @@ export const SPEED_LABELS_AR = [
   'موقوف', '1د/ث', '1س/ث', '1يوم/ث', '1أسبوع/ث', '1شهر/ث', '1سنة/ث',
 ];
 
-/** عدد ثواني اليوم الشمسي الكامل — يُستخدم لتحويل زاوية السحب اليدوي داخل المشهد (360° = يوم
- * كامل من دوران الأرض) إلى زمن محاكاة فعلي، بنفس المنطق الفلكي الذي تعتمد عليه كل الإسقاطات. */
+/** عدد ثواني اليوم الشمسي الكامل — يحوّل زاوية السحب اليدوي (360° = يوم كامل) إلى زمن محاكاة */
 export const SECONDS_PER_DAY = 86400;
 
-/** أقصى مسافة تحريك (Pan) مسموح بها، كنسبة من نصف قطر القبة، لكل وحدة تكبير فوق 1x.
- * عند التكبير 1x أو أقل: لا تحريك مسموح إطلاقاً (القبة كاملة تظهر أصلاً، لا حاجة له). */
+/** أقصى مسافة تحريك (Pan)، كنسبة من نصف قطر القبة، لكل وحدة تكبير فوق 1x */
 const PAN_CLAMP_FACTOR = 0.35;
 
 export interface LayerToggles {
@@ -36,19 +34,17 @@ interface SimulationState {
   date: Date;
   isPlaying: boolean;
   speedIndex: number;
-  /** معدّل دوران زمني يدوي مستمر (درجة/ثانية) — يُضبط عند إفلات سحبة داخل المشهد بعزم
-   * فيزيائي حقيقي؛ يبقى ثابتاً دون أي تباطؤ تلقائي حتى يُلغى بنقرة داخل المشهد أو بزر
-   * التشغيل/الإيقاف. عندما لا يكون null، يتجاوز هذا المعدل speedIndex/isPlaying تماماً. */
+  /** معدّل دوران زمني يدوي مستمر (درجة/ثانية) بعزم فيزيائي — لا يتباطأ حتى يُلغى */
   customTimeRateDegPerSec: number | null;
   zoomScale: number;
-  /** إزاحة تحريك المشهد (Pan) بعد التكبير — كنسبة من نصف قطر القبة الحالي (عادة بين -1 و1
-   * تقريباً)، تُطبَّق كترجمة في فضاء الشاشة داخل renderSky، فتبقى متناسبة تلقائياً مع أي
-   * تكبير لاحق بدل أن تُصبح بلا معنى إذا تغيّر مستوى التكبير بعد التحريك. */
   panX: number;
   panY: number;
   observer: ObserverLocation;
   layers: LayerToggles;
-  isolatedZodiac: ZodiacKey | null;
+  /** الأبراج المُبرزة حالياً — اختيار متعدد، لا حصر لواحد */
+  selectedZodiacs: ZodiacKey[];
+  /** فهارس المنازل القمرية المُبرزة (0..27) — اختيار متعدد */
+  selectedMansionIndices: number[];
 
   sceneRotationDeg: number;
 
@@ -66,7 +62,10 @@ interface SimulationState {
   resetPan: () => void;
   setObserver: (o: Partial<ObserverLocation>) => void;
   toggleLayer: (key: keyof LayerToggles) => void;
-  setIsolatedZodiac: (z: ZodiacKey | null) => void;
+  toggleZodiacSelection: (z: ZodiacKey) => void;
+  clearZodiacSelection: () => void;
+  toggleMansionSelection: (index: number) => void;
+  clearMansionSelection: () => void;
   setSceneRotation: (deg: number) => void;
   resetSceneRotation: () => void;
 
@@ -77,8 +76,6 @@ interface SimulationState {
   resetCalibration: () => void;
 }
 
-/** يُطبَّق في نقطتين (setZoom وsetPan) فيبقى التحريك ضمن حدود منطقية دائماً — سواء تغيّر
- * التكبير أو تغيّرت الإزاحة نفسها، بلا حاجة لتكرار منطق القصّ (Clamp) في كل مكان. */
 function clampPanToZoom(panX: number, panY: number, zoomScale: number): { panX: number; panY: number } {
   const maxFraction = Math.max(0, zoomScale - 1) * PAN_CLAMP_FACTOR;
   const mag = Math.hypot(panX, panY);
@@ -91,7 +88,6 @@ export const useSimulationStore = create<SimulationState>()(
   persist(
     (set, get) => ({
       date: new Date(),
-      // الحالة الافتراضية: يعمل المحاكي مباشرة بسرعة "1 دقيقة لكل ثانية" — لا يبدأ موقوفاً
       isPlaying: true,
       speedIndex: 1,
       customTimeRateDegPerSec: null,
@@ -100,7 +96,6 @@ export const useSimulationStore = create<SimulationState>()(
       panY: 0,
       observer: DEFAULT_OBSERVER,
       layers: {
-        // الحالة الافتراضية: الأرض والظل فقط مفعّلتان — بقية الطبقات يفعّلها المستخدم بنفسه
         land: true,
         terminator: true,
         tropics: false,
@@ -113,7 +108,8 @@ export const useSimulationStore = create<SimulationState>()(
         labels: false,
         observerMarker: false,
       },
-      isolatedZodiac: null,
+      selectedZodiacs: [],
+      selectedMansionIndices: [],
 
       sceneRotationDeg: 0,
 
@@ -128,9 +124,6 @@ export const useSimulationStore = create<SimulationState>()(
       },
       togglePlay: () =>
         set((s) => {
-          // زر التشغيل/الإيقاف هو "الملاذ الأخير" لإيقاف أي حركة زمنية جارية أياً كان
-          // مصدرها: تشغيلاً تلقائياً بالسرعة المحددة، أو دوراناً يدوياً مستمراً ناتجاً عن
-          // سحبة سابقة (customTimeRateDegPerSec) — في هذه الحالة يوقف كل شيء دفعة واحدة
           if (s.customTimeRateDegPerSec !== null) {
             return { customTimeRateDegPerSec: null, isPlaying: false };
           }
@@ -142,22 +135,32 @@ export const useSimulationStore = create<SimulationState>()(
       setCustomTimeRate: (degPerSec) =>
         set((s) => ({
           customTimeRateDegPerSec: degPerSec,
-          // عند تفعيل معدّل يدوي جديد نوقف وضع التشغيل التلقائي بالسرعة المحددة كي لا يتراكم
-          // الاثنان معاً؛ عند إلغائه (null) نُبقي isPlaying كما كان (يبقى موقوفاً افتراضياً)
           isPlaying: degPerSec !== null ? false : s.isPlaying,
         })),
       setZoom: (z) => {
         const clamped = Math.min(6, Math.max(0.5, z));
         const { panX, panY } = get();
-        const nextPan = clampPanToZoom(panX, panY, clamped);
-        set({ zoomScale: clamped, ...nextPan });
+        set({ zoomScale: clamped, ...clampPanToZoom(panX, panY, clamped) });
       },
       setPan: (dxFraction, dyFraction) =>
         set((s) => clampPanToZoom(s.panX + dxFraction, s.panY + dyFraction, s.zoomScale)),
       resetPan: () => set({ panX: 0, panY: 0 }),
       setObserver: (o) => set((s) => ({ observer: { ...s.observer, ...o } })),
       toggleLayer: (key) => set((s) => ({ layers: { ...s.layers, [key]: !s.layers[key] } })),
-      setIsolatedZodiac: (z) => set({ isolatedZodiac: z }),
+      toggleZodiacSelection: (z) =>
+        set((s) => ({
+          selectedZodiacs: s.selectedZodiacs.includes(z)
+            ? s.selectedZodiacs.filter((x) => x !== z)
+            : [...s.selectedZodiacs, z],
+        })),
+      clearZodiacSelection: () => set({ selectedZodiacs: [] }),
+      toggleMansionSelection: (index) =>
+        set((s) => ({
+          selectedMansionIndices: s.selectedMansionIndices.includes(index)
+            ? s.selectedMansionIndices.filter((x) => x !== index)
+            : [...s.selectedMansionIndices, index],
+        })),
+      clearMansionSelection: () => set({ selectedMansionIndices: [] }),
       setSceneRotation: (deg) => {
         let d = deg % 360;
         if (d < 0) d += 360;
@@ -185,23 +188,22 @@ export const useSimulationStore = create<SimulationState>()(
     }),
     {
       name: 'astro-clock-settings',
-      version: 2,
-      // ترقية بسيطة من النسخة السابقة (v1): حذف meridians24 من أي بيانات محفوظة قديمة
+      version: 3,
       migrate: (persisted: any) => {
-        if (persisted?.layers && 'meridians24' in persisted.layers) {
-          delete persisted.layers.meridians24;
-        }
+        if (persisted?.layers && 'meridians24' in persisted.layers) delete persisted.layers.meridians24;
+        if (persisted && 'isolatedZodiac' in persisted) delete persisted.isolatedZodiac;
+        if (persisted && !Array.isArray(persisted.selectedZodiacs)) persisted.selectedZodiacs = [];
+        if (persisted && !Array.isArray(persisted.selectedMansionIndices)) persisted.selectedMansionIndices = [];
         return persisted;
       },
       partialize: (s) => ({
         zoomScale: s.zoomScale,
         observer: s.observer,
         layers: s.layers,
-        isolatedZodiac: s.isolatedZodiac,
+        selectedZodiacs: s.selectedZodiacs,
+        selectedMansionIndices: s.selectedMansionIndices,
         sceneRotationDeg: s.sceneRotationDeg,
         speedIndex: s.speedIndex,
-        // ملاحظة: panX/panY وcustomTimeRateDegPerSec مقصود عدم حفظهما — حالتا تفاعل مؤقتتان
-        // يُفضَّل أن تبدآ نظيفتين (0 وnull) في كل تحميل جديد للصفحة
       }),
     }
   )

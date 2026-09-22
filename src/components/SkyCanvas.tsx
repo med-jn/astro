@@ -11,12 +11,7 @@ interface Props {
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 6;
 const HIT_RADIUS_PX = 14;
-
-// النسبة من نصف قطر القبة التي تُعتبر "منطقة الحافة" (تدوير المشهد المرئي) — ما دونها
-// يُعتبر "منطقة الداخل" (سحب الزمن بعزم فيزيائي). قابلة للتعديل حسب الإحساس المطلوب.
 const EDGE_BAND_FRACTION = 0.78;
-
-// عتبات تمييز "نقرة بسيطة" (لإيقاف أي حركة زمنية جارية) عن "سحبة" حقيقية
 const TAP_MAX_DURATION_MS = 350;
 const TAP_MAX_MOVEMENT_PX = 6;
 
@@ -30,9 +25,6 @@ export function SkyCanvas({ onFrame }: Props) {
   const lastTimestampRef = useRef<number>(0);
   const hitTargetsRef = useRef<HitTarget[]>([]);
 
-  // تُراكم هنا أي تغييرات دوران/تكبير/تحريك/سحب-زمني أثناء الإطار الحالي، وتُطبَّق دفعة
-  // واحدة فقط في بداية كل إطار رسم (بدل استدعاء المتجر عند كل حدث pointermove خام، الذي قد
-  // يصل 100+ مرة/ثانية ويُثقل الرسم بإعادة رسم لوحة التحكم بشكل متكرر جداً).
   const pendingRotationDeltaRef = useRef(0);
   const pendingZoomFactorRef = useRef(1);
   const pendingPanDeltaRef = useRef({ x: 0, y: 0 });
@@ -62,7 +54,6 @@ export function SkyCanvas({ onFrame }: Props) {
       const deltaSeconds = (timestamp - lastTimestampRef.current) / 1000;
       lastTimestampRef.current = timestamp;
 
-      // تطبيق أي تغييرات مُراكَمة من التفاعل هذا الإطار فقط — مرة واحدة، وليس عند كل حدث
       let flushState = useSimulationStore.getState();
       if (pendingRotationDeltaRef.current !== 0) {
         flushState.setSceneRotation(flushState.sceneRotationDeg + pendingRotationDeltaRef.current);
@@ -80,14 +71,11 @@ export function SkyCanvas({ onFrame }: Props) {
       }
       if (pendingTimeDragDeltaDegRef.current !== 0) {
         flushState = useSimulationStore.getState();
-        // 360° من السحب = يوم كامل من زمن المحاكاة — نفس منطق دوران الأرض الحقيقي
         const addedMs = (pendingTimeDragDeltaDegRef.current / 360) * SECONDS_PER_DAY * 1000;
         flushState.setDate(new Date(flushState.date.getTime() + addedMs));
         pendingTimeDragDeltaDegRef.current = 0;
       }
 
-      // الحركة الزمنية المستمرة: إما معدّل يدوي بعزم فيزيائي (لا يتباطأ)، أو تشغيل تلقائي
-      // بالسرعة المحددة من شريط السرعة — الاثنان لا يعملان معاً أبداً (انظر setCustomTimeRate)
       const state = useSimulationStore.getState();
       if (state.customTimeRateDegPerSec !== null) {
         const simSecondsPerRealSecond = (state.customTimeRateDegPerSec / 360) * SECONDS_PER_DAY;
@@ -103,7 +91,8 @@ export function SkyCanvas({ onFrame }: Props) {
         observer: currentState.observer,
         zoomScale: currentState.zoomScale,
         layers: currentState.layers,
-        isolatedZodiac: currentState.isolatedZodiac,
+        selectedZodiacs: currentState.selectedZodiacs,
+        selectedMansionIndices: currentState.selectedMansionIndices,
         calibration: currentState.calibration,
         sceneRotationDeg: currentState.sceneRotationDeg,
         panX: currentState.panX,
@@ -128,31 +117,22 @@ export function SkyCanvas({ onFrame }: Props) {
     if (!canvas) return;
 
     const activePointers = new Map<number, { x: number; y: number }>();
-
-    // وضع السحب بمؤشر واحد: "حافة" (تدوير مرئي مباشر) أو "داخل" (سحب زمني بعزم فيزيائي)
     let singleDragMode: 'edge' | 'inside' | null = null;
     let lastAngleDeg = 0;
-    // آخر عينتين (زاوية + توقيت) — تكفي لحساب سرعة الإفلات اللحظية عند نهاية سحب "الداخل"
     let velocitySamples: { angleDeg: number; t: number }[] = [];
     let dragStartTime = 0;
     let dragStartClientX = 0;
     let dragStartClientY = 0;
     let dragTotalMovementPx = 0;
-
-    // وضع المؤشرين: تباعد للتكبير + حركة المنتصف للتحريك، معاً في نفس الإيماءة
     let lastPinchDist = 0;
     let lastMidpoint = { x: 0, y: 0 };
-
-    // تحريك بزر الفأرة الأيمن — الخيار المتاح لمستخدمي الحاسوب (لا توجد إيماءة إصبعين بالفأرة)
     let rightButtonPanning = false;
 
     function angleFromCenterDeg(clientX: number, clientY: number): number {
       const rect = canvas!.getBoundingClientRect();
       const cx = rect.left + rect.width / 2;
       const cy = rect.top + rect.height / 2;
-      const dx = clientX - cx;
-      const dy = clientY - cy;
-      return Math.atan2(dx, -dy) * (180 / Math.PI);
+      return Math.atan2(clientX - cx, -(clientY - cy)) * (180 / Math.PI);
     }
 
     function distanceFromCenterPx(clientX: number, clientY: number): number {
@@ -164,8 +144,7 @@ export function SkyCanvas({ onFrame }: Props) {
 
     function currentOuterRadiusPx(): number {
       const rect = canvas!.getBoundingClientRect();
-      const zoomScale = useSimulationStore.getState().zoomScale;
-      return computeOuterRadiusPx(rect.width, rect.height, zoomScale);
+      return computeOuterRadiusPx(rect.width, rect.height, useSimulationStore.getState().zoomScale);
     }
 
     function pinchDistance(): number {
@@ -188,10 +167,7 @@ export function SkyCanvas({ onFrame }: Props) {
       let nearestDist = HIT_RADIUS_PX;
       for (const t of hitTargetsRef.current) {
         const d = Math.hypot(t.x - localX, t.y - localY);
-        if (d < nearestDist) {
-          nearest = t;
-          nearestDist = d;
-        }
+        if (d < nearestDist) { nearest = t; nearestDist = d; }
       }
       return nearest;
     }
@@ -212,9 +188,7 @@ export function SkyCanvas({ onFrame }: Props) {
       canvas!.setPointerCapture(e.pointerId);
       activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
-      if (e.pointerType !== 'mouse') {
-        setTooltip(findNearestTarget(e.clientX, e.clientY));
-      }
+      if (e.pointerType !== 'mouse') setTooltip(findNearestTarget(e.clientX, e.clientY));
 
       if (e.button === 2) {
         rightButtonPanning = true;
@@ -222,8 +196,6 @@ export function SkyCanvas({ onFrame }: Props) {
         return;
       }
 
-      // إمساك السطح يعني "أوقف أي دوران زمني مستمر بعزم فيزيائي الآن"، بصرف النظر عمّا
-      // سيحدث بعد ذلك (سحبة جديدة أو مجرد نقرة) — يبدأ التفاعل الجديد من حالة هادئة دائماً
       if (activePointers.size === 1 && useSimulationStore.getState().customTimeRateDegPerSec !== null) {
         useSimulationStore.getState().setCustomTimeRate(null);
       }
@@ -248,21 +220,15 @@ export function SkyCanvas({ onFrame }: Props) {
       }
 
       if (!activePointers.has(e.pointerId)) {
-        if (e.pointerType === 'mouse') {
-          setTooltip(findNearestTarget(e.clientX, e.clientY));
-        }
+        if (e.pointerType === 'mouse') setTooltip(findNearestTarget(e.clientX, e.clientY));
         return;
       }
 
       activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
       if (activePointers.size >= 2) {
-        // إيماءة إصبعين موحّدة: التباعد بينهما يُكبِّر، وحركة منتصف المسافة بينهما تُحرِّك —
-        // نفس أسلوب تكبير/تحريك الصور المعتاد في كل تطبيقات الهاتف تقريباً
         const dist = pinchDistance();
-        if (lastPinchDist > 0 && dist > 0) {
-          pendingZoomFactorRef.current *= dist / lastPinchDist;
-        }
+        if (lastPinchDist > 0 && dist > 0) pendingZoomFactorRef.current *= dist / lastPinchDist;
         lastPinchDist = dist;
 
         const mid = pinchMidpoint();
@@ -289,20 +255,17 @@ export function SkyCanvas({ onFrame }: Props) {
         if (delta > 180) delta -= 360;
         if (delta < -180) delta += 360;
         lastAngleDeg = angle;
-        // تغذية مباشرة أثناء السحب نفسه: الزمن يتحرك فوراً مع إصبعك، ليس فقط بعد الإفلات
         pendingTimeDragDeltaDegRef.current += delta;
 
         const now = performance.now();
         const prevCumulative = velocitySamples[velocitySamples.length - 1].angleDeg;
         velocitySamples.push({ angleDeg: prevCumulative + delta, t: now });
-        // نحتاج فقط أحدث عينتين لحساب سرعة الإفلات اللحظية، لا تاريخاً كاملاً للسحبة
         if (velocitySamples.length > 2) velocitySamples.shift();
       }
     }
 
     function onPointerUp(e: PointerEvent) {
       try { canvas!.releasePointerCapture(e.pointerId); } catch { /* تجاهل */ }
-
       if (e.button === 2) rightButtonPanning = false;
 
       activePointers.delete(e.pointerId);
@@ -313,22 +276,15 @@ export function SkyCanvas({ onFrame }: Props) {
         const isTap = durationMs < TAP_MAX_DURATION_MS && dragTotalMovementPx < TAP_MAX_MOVEMENT_PX;
 
         if (isTap) {
-          // نقرة بسيطة في أي مكان داخل المشهد = "أوقف أي حركة زمنية جارية الآن" — تشغيلاً
-          // تلقائياً بالسرعة المحددة أو دوراناً يدوياً مستمراً، بصرف النظر عن مكان النقرة
           const s = useSimulationStore.getState();
-          if (s.customTimeRateDegPerSec !== null) {
-            s.setCustomTimeRate(null);
-          } else if (s.isPlaying) {
-            s.togglePlay();
-          }
+          if (s.customTimeRateDegPerSec !== null) s.setCustomTimeRate(null);
+          else if (s.isPlaying) s.togglePlay();
         } else if (velocitySamples.length >= 2) {
           const a = velocitySamples[0];
           const b = velocitySamples[velocitySamples.length - 1];
           const dtSec = (b.t - a.t) / 1000;
           if (dtSec > 0.01) {
             const releaseVelocityDegPerSec = (b.angleDeg - a.angleDeg) / dtSec;
-            // إفلات بعزم فيزيائي حقيقي: يستمر الدوران بنفس هذه السرعة دون أي تباطؤ تلقائي،
-            // حتى يوقفه المستخدم بنقرة داخل المشهد أو بزر التشغيل/الإيقاف
             useSimulationStore.getState().setCustomTimeRate(releaseVelocityDegPerSec);
           }
         }
@@ -345,43 +301,24 @@ export function SkyCanvas({ onFrame }: Props) {
       }
     }
 
-    function onPointerLeave() {
-      setTooltip(null);
-    }
+    function onPointerLeave() { setTooltip(null); }
 
     function onWheel(e: WheelEvent) {
       e.preventDefault();
-      const factor = e.deltaY > 0 ? 0.9 : 1.1;
-      pendingZoomFactorRef.current *= factor;
+      pendingZoomFactorRef.current *= e.deltaY > 0 ? 0.9 : 1.1;
     }
 
-    function onContextMenu(e: MouseEvent) {
-      // يمنع قائمة الفأرة اليمنى الافتراضية كي يعمل "سحب بالزر الأيمن = تحريك" بسلاسة
-      e.preventDefault();
-    }
+    function onContextMenu(e: MouseEvent) { e.preventDefault(); }
 
     function onKeyDown(e: KeyboardEvent) {
       const target = e.target as HTMLElement | null;
       if (target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return;
-
       switch (e.key) {
-        case 'ArrowLeft':
-          pendingRotationDeltaRef.current -= 3;
-          break;
-        case 'ArrowRight':
-          pendingRotationDeltaRef.current += 3;
-          break;
-        case 'ArrowUp':
-        case '+':
-        case '=':
-          pendingZoomFactorRef.current *= 1.08;
-          break;
-        case 'ArrowDown':
-        case '-':
-          pendingZoomFactorRef.current *= 0.92;
-          break;
-        default:
-          return;
+        case 'ArrowLeft': pendingRotationDeltaRef.current -= 3; break;
+        case 'ArrowRight': pendingRotationDeltaRef.current += 3; break;
+        case 'ArrowUp': case '+': case '=': pendingZoomFactorRef.current *= 1.08; break;
+        case 'ArrowDown': case '-': pendingZoomFactorRef.current *= 0.92; break;
+        default: return;
       }
       e.preventDefault();
     }
@@ -408,9 +345,7 @@ export function SkyCanvas({ onFrame }: Props) {
   }, []);
 
   function playAudio(url: string) {
-    try {
-      new Audio(url).play().catch(() => { /* تجاهل فشل التشغيل (مثلاً ملف غير موجود بعد) */ });
-    } catch { /* تجاهل */ }
+    try { new Audio(url).play().catch(() => {}); } catch { /* تجاهل */ }
   }
 
   return (
@@ -421,11 +356,7 @@ export function SkyCanvas({ onFrame }: Props) {
           <div className="hover-tooltip-row">
             <span className="hover-tooltip-name">{tooltip.name}</span>
             {tooltip.audioUrl && (
-              <button
-                className="hover-tooltip-audio-btn"
-                onClick={() => playAudio(tooltip.audioUrl!)}
-                title="استماع"
-              >
+              <button className="hover-tooltip-audio-btn" onClick={() => playAudio(tooltip.audioUrl!)} title="استماع">
                 <Volume2 size={12} />
               </button>
             )}
