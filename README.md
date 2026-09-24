@@ -1,21 +1,22 @@
 
 ```
-ASTRO
+FLIGHT
 ├─ .oxlintrc.json
 ├─ index.html
 ├─ package-lock.json
 ├─ package.json
 ├─ public
 │  ├─ data
-│  │  ├─ stars.json
-│  │  └─ zodiac.json
+│  │  └─ airports.json
 │  ├─ favicon.svg
 │  ├─ icons.svg
 │  └─ images
 │     ├─ earth-2.jpeg
 │     ├─ earth-calibration.jpeg
 │     └─ earth.jpeg
-├─ README.md
+├─ scripts
+│  └─ build-airports.mjs
+├─ SETUP.md
 ├─ src
 │  ├─ App.tsx
 │  ├─ assets
@@ -25,90 +26,36 @@ ASTRO
 │  ├─ calibrate-main.tsx
 │  ├─ CalibrateApp.tsx
 │  ├─ components
+│  │  ├─ AirportSearch.tsx
 │  │  ├─ ControlsPanel.tsx
+│  │  ├─ FlightCanvas.tsx
 │  │  ├─ InfoCard.tsx
 │  │  ├─ MapCalibrator.tsx
 │  │  └─ SkyCanvas.tsx
 │  ├─ core
-│  │  ├─ bodies.ts
-│  │  ├─ contentRegistry.ts
+│  │  ├─ airportCatalog.ts
 │  │  ├─ earthImage.ts
-│  │  ├─ eclipticTransform.ts
-│  │  ├─ mansions.ts
+│  │  ├─ greatCircle.ts
 │  │  ├─ mapCalibration.ts
-│  │  ├─ observer.ts
 │  │  ├─ projection.ts
-│  │  ├─ starCatalog.ts
-│  │  ├─ terminator.ts
-│  │  └─ zodiac.ts
-│  ├─ index.css
-│  ├─ main.tsx
-│  ├─ render
-│  │  └─ skyRenderer.ts
-│  ├─ state
-│  │  └─ store.ts
-│  └─ types
-│     └─ astro.ts
-├─ tsconfig.app.json
-├─ tsconfig.json
-├─ tsconfig.node.json
-└─ vite.config.ts
-
-```
-```
-ASTRO
-├─ .oxlintrc.json
-├─ index.html
-├─ package-lock.json
-├─ package.json
-├─ public
-│  ├─ data
-│  │  ├─ stars.json
-│  │  └─ zodiac.json
-│  ├─ favicon.svg
-│  ├─ icons.svg
-│  └─ images
-│     ├─ earth-2.jpeg
-│     ├─ earth-calibration.jpeg
-│     └─ earth.jpeg
-├─ README.md
-├─ src
-│  ├─ App.tsx
-│  ├─ assets
-│  │  ├─ hero.png
-│  │  ├─ typescript.svg
-│  │  └─ vite.svg
-│  ├─ calibrate-main.tsx
-│  ├─ CalibrateApp.tsx
-│  ├─ components
-│  │  ├─ ControlsPanel.tsx
-│  │  ├─ InfoCard.tsx
-│  │  ├─ MapCalibrator.tsx
-│  │  └─ SkyCanvas.tsx
-│  ├─ core
-│  │  ├─ bodies.ts
-│  │  ├─ contentRegistry.ts
-│  │  ├─ earthImage.ts
-│  │  ├─ eclipticTransform.ts
-│  │  ├─ mansions.ts
-│  │  ├─ mapCalibration.ts
-│  │  ├─ observer.ts
-│  │  ├─ projection.ts
-│  │  ├─ starCatalog.ts
+│  │  ├─ sunPosition.ts
 │  │  ├─ supabaseClient.ts
-│  │  ├─ terminator.ts
-│  │  └─ zodiac.ts
+│  │  └─ terminator.ts
 │  ├─ index.css
 │  ├─ main.tsx
 │  ├─ render
+│  │  ├─ flightRenderer.ts
 │  │  └─ skyRenderer.ts
 │  ├─ state
 │  │  └─ store.ts
 │  └─ types
-│     └─ astro.ts
+│     └─ flight.ts
+├─ supabase
+│  └─ schema.txt
 ├─ tsconfig.app.json
 ├─ tsconfig.json
 ├─ tsconfig.node.json
+├─ vercel.json
 └─ vite.config.ts
 
 ```
