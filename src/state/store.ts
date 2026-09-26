@@ -45,8 +45,16 @@ interface SimulationState {
   selectedZodiacs: ZodiacKey[];
   /** فهارس المنازل القمرية المُبرزة (0..27) — اختيار متعدد */
   selectedMansionIndices: number[];
+  /** معرّفات الكوكبات (groups) المُبرزة حالياً — اختيار متعدد، بنفس نمط الأبراج والمنازل */
+  selectedGroupIds: number[];
 
   sceneRotationDeg: number;
+
+  /** أبعاد الكانفس الفعلية بالبكسل (CSS px) — يحدّثها SkyCanvas عند التركيب/تغيير الحجم فقط،
+   *  لا كل إطار، لتفادي إعادة رسم غير ضرورية. تُستخدم خارج حلقة الرسم (مثل توسيط نتائج
+   *  البحث الفوري) لحساب نفس هندسة الإسقاط المستخدمة فعلياً في اللحظة الحالية. */
+  viewportWidth: number;
+  viewportHeight: number;
 
   calibration: MapCalibration | null;
   isCalibrating: boolean;
@@ -66,8 +74,11 @@ interface SimulationState {
   clearZodiacSelection: () => void;
   toggleMansionSelection: (index: number) => void;
   clearMansionSelection: () => void;
+  toggleGroupSelection: (groupId: number) => void;
+  clearGroupSelection: () => void;
   setSceneRotation: (deg: number) => void;
   resetSceneRotation: () => void;
+  setViewportSize: (width: number, height: number) => void;
 
   startCalibrating: () => void;
   cancelCalibrating: () => void;
@@ -110,8 +121,12 @@ export const useSimulationStore = create<SimulationState>()(
       },
       selectedZodiacs: [],
       selectedMansionIndices: [],
+      selectedGroupIds: [],
 
       sceneRotationDeg: 0,
+
+      viewportWidth: typeof window !== 'undefined' ? window.innerWidth : 1024,
+      viewportHeight: typeof window !== 'undefined' ? window.innerHeight : 768,
 
       calibration: loadSavedCalibration(),
       isCalibrating: false,
@@ -161,12 +176,20 @@ export const useSimulationStore = create<SimulationState>()(
             : [...s.selectedMansionIndices, index],
         })),
       clearMansionSelection: () => set({ selectedMansionIndices: [] }),
+      toggleGroupSelection: (groupId) =>
+        set((s) => ({
+          selectedGroupIds: s.selectedGroupIds.includes(groupId)
+            ? s.selectedGroupIds.filter((x) => x !== groupId)
+            : [...s.selectedGroupIds, groupId],
+        })),
+      clearGroupSelection: () => set({ selectedGroupIds: [] }),
       setSceneRotation: (deg) => {
         let d = deg % 360;
         if (d < 0) d += 360;
         set({ sceneRotationDeg: d });
       },
       resetSceneRotation: () => set({ sceneRotationDeg: 0 }),
+      setViewportSize: (width, height) => set({ viewportWidth: width, viewportHeight: height }),
 
       startCalibrating: () => set({ isCalibrating: true }),
       cancelCalibrating: () => set({ isCalibrating: false }),
@@ -194,6 +217,7 @@ export const useSimulationStore = create<SimulationState>()(
         if (persisted && 'isolatedZodiac' in persisted) delete persisted.isolatedZodiac;
         if (persisted && !Array.isArray(persisted.selectedZodiacs)) persisted.selectedZodiacs = [];
         if (persisted && !Array.isArray(persisted.selectedMansionIndices)) persisted.selectedMansionIndices = [];
+        if (persisted && !Array.isArray(persisted.selectedGroupIds)) persisted.selectedGroupIds = [];
         return persisted;
       },
       partialize: (s) => ({
@@ -202,6 +226,7 @@ export const useSimulationStore = create<SimulationState>()(
         layers: s.layers,
         selectedZodiacs: s.selectedZodiacs,
         selectedMansionIndices: s.selectedMansionIndices,
+        selectedGroupIds: s.selectedGroupIds,
         sceneRotationDeg: s.sceneRotationDeg,
         speedIndex: s.speedIndex,
       }),

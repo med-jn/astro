@@ -126,10 +126,15 @@ export function getStarColor(spect: string | null): string {
   return SPECTRAL_COLORS[spect.toUpperCase()] ?? '#ffffff';
 }
 
-/** نصف قطر بصري منطقي للنجم على الشاشة بناءً على قدره الظاهري (الأكثر سطوعاً = أكبر حجماً) */
+/**
+ * نصف قطر بصري للنجم بالبكسل — مُصغَّر عمداً ليبقى النجم "نقطة" واضحة لا "بقعة"،
+ * وليظل دائماً أصغر من أي كوكب مهما سطع (انظر drawPlanets في skyRenderer.ts حيث
+ * أدنى نصف قطر لأي كوكب أكبر من أقصى نصف قطر ممكن هنا، فلا يلتبس النجم بكوكب أبداً).
+ * أسطع نجم ممكن (قدر -1.5 تقريباً كنجم الشعرى) → ~1.5px، وأخفت نجم مرئي (قدر 6.5) → 0.3px.
+ */
 export function getStarRadiusPx(mag: number): number {
   const clamped = Math.max(-1.5, Math.min(6.5, mag));
-  return Math.max(0.4, 2.6 - clamped * 0.36);
+  return Math.max(0.3, 1.275 - clamped * 0.15);
 }
 
 /**

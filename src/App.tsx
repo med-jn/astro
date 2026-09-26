@@ -4,6 +4,8 @@ import { ControlsPanel } from './components/ControlsPanel';
 import { InfoCard } from './components/InfoCard';
 import { loadStarCatalog, loadArabicEnrichment } from './core/starCatalog';
 import { loadZodiacData } from './core/zodiac';
+import { loadZodiacSigns } from './core/zodiacNamesAr';
+import { loadStarGroups } from './core/starGroups';
 import { loadEarthImage } from './core/earthImage';
 import type { RenderOutput } from './render/skyRenderer';
 
@@ -12,8 +14,10 @@ export default function App() {
 
   useEffect(() => {
     loadStarCatalog();
-    loadArabicEnrichment(); // جديد — الإثراء العربي، بالخلفية دون انتظار
+    loadArabicEnrichment(); // الإثراء العربي للنجوم، بالخلفية دون انتظار
     loadZodiacData();
+    loadZodiacSigns(); // أسماء وحدود الأبراج الحقيقية من سوبابيز، بالخلفية أيضاً
+    loadStarGroups(); // جديد — الكوكبات (groups/group_stars/group_lines) من سوبابيز
     // صورة الأرض الحقيقية: إن وُجدت معايرة افتراضية مُضمَّنة أو محفوظة محلياً، ستُستخدم هنا
     loadEarthImage();
   }, []);

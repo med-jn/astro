@@ -1,26 +1,33 @@
 @import url('https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=IBM+Plex+Sans+Arabic:wght@400;500;600&display=swap');
 
 :root {
-  --bg-main: #14100d;
-  --bg-deep: #070504;
-  --bg-surface: #1e1914;
-  --bg-surface-2: #27211a;
-  --bg-card: #221b15;
-  --glass: rgba(20, 16, 13, 0.86);
+  /* هوية بصرية واحدة: رمادي-فحمي محايد + لمسة برونز مطفأة وحيدة كلون تمييز — بلا تعدد ألوان */
+  --bg-deep: #07080a;
+  --bg-main: #0d0f12;
+  --bg-surface: #14171c;
+  --bg-surface-2: #1b1f26;
+  --bg-card: #171a20;
+  --glass: rgba(8, 9, 11, 0.9);
 
-  --text-primary: #f5ead6;
-  --text-secondary: #d4c3aa;
-  --text-muted: #9c8a73;
+  --text-primary: #eef1f4;
+  --text-secondary: #aab2bd;
+  --text-muted: #6b7280;
 
-  --accent-gold: #e5b342;
-  --accent-subtle: rgba(229, 179, 66, 0.14);
-  --gold-gradient: linear-gradient(135deg, #b88722 0%, #e5b342 25%, #f5d77f 50%, #e5b342 75%, #a37315 100%);
-  --gold-border: #d49f2e;
-  --gold-glow: rgba(229, 179, 66, 0.4);
+  --accent-gold: #b08d57;
+  --accent-subtle: rgba(176, 141, 87, 0.12);
+  --gold-gradient: linear-gradient(135deg, #8a6d3f 0%, #b08d57 30%, #ccae7c 55%, #b08d57 80%, #7a5f37 100%);
+  --gold-border: #9c7d4c;
+  --gold-glow: rgba(176, 141, 87, 0.3);
 
-  --border-color: #332920;
-  --border-hover: #524334;
-  --success-ink: #7cb87d;
+  --border-color: #262a31;
+  --border-hover: #3a3f48;
+  --success-ink: #7c9a8b;
+  --danger-ink: #a8695f;
+
+  /* نصف قطر الزوايا موحَّد هنا فقط — قيم أحدّ من السابق لهوية "لوحة قياس" رسمية بدل مظهر تطبيق استهلاكي */
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 12px;
 
   --ease: cubic-bezier(0.16, 1, 0.3, 1);
 }
@@ -53,8 +60,7 @@ a { color: inherit; text-decoration: none; }
 :focus-visible { outline: 2px solid var(--accent-gold); outline-offset: 2px; }
 
 /* ==========================================================================
-   هيكل الصفحة: شريط أيقونات علوي رفيع موحّد على كل الأجهزة — الخريطة تبقى
-   أكبر مساحة ممكنة دائماً، بلا لوحة جانبية على الحاسوب
+   هيكل الصفحة
    ========================================================================== */
 .app-root {
   display: flex;
@@ -64,12 +70,20 @@ a { color: inherit; text-decoration: none; }
   background: var(--bg-main);
 }
 
+/* على الحاسوب: لوحة جانبية ثابتة + القبة تملأ الباقي، بدل شريط علوي ضيق يهدر المساحة.
+   بما أن اللوحة (ControlsPanel) هي العنصر الأول في app-root وواجهة التطبيق RTL، فهي تظهر
+   تلقائياً عند البداية المنطقية (يمين الشاشة) دون أي تموضع إضافي. إن ظهرت على اليسار خطأً
+   (لو لم يكن dir="rtl" مضبوطاً فعلياً على العنصر الجذر)، أضف flex-direction: row-reverse هنا. */
+@media (min-width: 900px) {
+  .app-root { flex-direction: row; }
+}
+
 .stage {
   position: relative;
   flex: 1 1 0;
   min-width: 0;
   min-height: 0;
-  background: radial-gradient(ellipse at center, #17130f 0%, #0d0a07 55%, #050403 100%);
+  background: radial-gradient(ellipse at center, #10131a 0%, #0a0c10 55%, #050607 100%);
 }
 
 .sky-canvas-wrap { position: absolute; inset: 0; z-index: 2; }
@@ -90,7 +104,7 @@ a { color: inherit; text-decoration: none; }
 .hover-tooltip {
   position: absolute;
   transform: translate(-50%, -130%);
-  background: rgba(14, 11, 8, 0.94);
+  background: rgba(8, 9, 11, 0.95);
   border: 1px solid var(--border-hover);
   border-radius: 10px;
   padding: 7px 11px;
@@ -112,15 +126,15 @@ a { color: inherit; text-decoration: none; }
 }
 
 /* ==========================================================================
-   شريط الأيقونات
+   لوحة التحكم — شريط علوي على الموبايل، لوحة جانبية رسمية على الحاسوب
    ========================================================================== */
 .controls-panel {
   position: relative;
   z-index: 30;
   flex-shrink: 0;
   background: var(--glass);
-  backdrop-filter: blur(18px) saturate(1.2);
-  -webkit-backdrop-filter: blur(18px) saturate(1.2);
+  backdrop-filter: blur(18px) saturate(1.1);
+  -webkit-backdrop-filter: blur(18px) saturate(1.1);
   padding-top: env(safe-area-inset-top, 0px);
   box-shadow: 0 12px 30px -14px rgba(0, 0, 0, 0.8);
 }
@@ -131,30 +145,113 @@ a { color: inherit; text-decoration: none; }
   bottom: 0;
   height: 1px;
   background: linear-gradient(90deg, transparent, var(--gold-border), transparent);
-  opacity: 0.55;
+  opacity: 0.4;
   pointer-events: none;
+}
+
+.sidebar-brand {
+  display: none;
+  align-items: center;
+  gap: 10px;
+  padding: 18px 16px 14px;
+  border-bottom: 1px solid var(--border-color);
+  color: var(--accent-gold);
+  font-family: 'Amiri', serif;
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+/* عنوان صغير يفصل كل مجموعة وظيفية داخل اللوحة الجانبية — غير ظاهر في الشريط العلوي للموبايل */
+.sidebar-section-label {
+  display: none;
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  padding: 0 10px 6px;
+}
+
+@media (min-width: 900px) {
+  .controls-panel {
+    width: 240px;
+    height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    padding-top: 0;
+    box-shadow: none;
+    border-inline-start: 1px solid var(--border-color);
+  }
+  .controls-panel::after { display: none; }
+  .sidebar-brand { display: flex; }
 }
 
 .icon-bar {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  padding: 8px 12px;
-  max-width: 640px;
+  gap: 10px;
+  padding: 8px 14px;
+  max-width: 680px;
   margin: 0 auto;
   overflow-x: auto;
   scrollbar-width: none;
 }
 .icon-bar::-webkit-scrollbar { display: none; }
 
+@media (min-width: 900px) {
+  .icon-bar {
+    flex: 1;
+    flex-direction: column;
+    align-items: stretch;
+    max-width: none;
+    margin: 0;
+    padding: 16px 12px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    gap: 0;
+  }
+  .icon-bar::-webkit-scrollbar { display: block; width: 5px; }
+  .icon-bar::-webkit-scrollbar-thumb { background: var(--border-hover); border-radius: 3px; }
+}
+
+/* تجميع منطقي: كبسولة خفيفة لكل مجموعة وظيفية على الموبايل، وقسم رأسي بعنوان على الحاسوب */
+.icon-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px;
+  border-radius: var(--radius-lg);
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  flex-shrink: 0;
+}
+
+@media (min-width: 900px) {
+  .icon-group {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 2px;
+    padding: 0;
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    margin-bottom: 20px;
+  }
+  .icon-group .sidebar-section-label { display: block; }
+}
+
 .icon-item { position: relative; flex-shrink: 0; }
+@media (min-width: 900px) {
+  .icon-item { flex-shrink: 1; }
+}
 
 .icon-trigger {
   position: relative;
   width: 44px;
   height: 44px;
-  border-radius: 13px;
+  border-radius: var(--radius-md);
   display: grid;
   place-items: center;
   background: var(--bg-surface);
@@ -167,8 +264,70 @@ a { color: inherit; text-decoration: none; }
 .icon-trigger[data-active='true'] {
   background: var(--gold-gradient);
   border-color: var(--gold-border);
-  color: #1a1209;
-  box-shadow: 0 2px 12px var(--gold-glow);
+  color: #14100a;
+  box-shadow: 0 1px 6px var(--gold-glow);
+}
+
+/* زر التشغيل: هوية دائرية منفردة — فعل مباشر متكرر، لا تبديل عرض كبقية الأيقونات */
+.icon-trigger.icon-trigger-hero {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--bg-surface-2);
+  border-color: var(--border-hover);
+  color: var(--text-primary);
+}
+.icon-trigger.icon-trigger-hero[data-active='true'] {
+  background: var(--gold-gradient);
+  border-color: var(--gold-border);
+  color: #14100a;
+}
+
+.icon-caption {
+  display: none;
+  font-size: 9.5px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+/* الحاسوب: اللوحة صارت جانبية، فكل صف = أيقونة + تسمية بجانبها بعرض كامل، بدل شريط علوي بتسميات أسفل الأيقونة */
+@media (min-width: 900px) {
+  .icon-trigger:not(.icon-trigger-hero) {
+    width: 100%;
+    height: auto;
+    min-width: 0;
+    flex-direction: row;
+    justify-content: flex-start;
+    gap: 11px;
+    padding: 9px 11px;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    border-color: transparent;
+  }
+  .icon-trigger:not(.icon-trigger-hero):hover {
+    background: var(--bg-surface);
+    border-color: transparent;
+  }
+  /* تحديد بشريط لوني رفيع بدل تعبئة كاملة صاخبة — أنسب لصف أيقونات متراصّة رأسياً */
+  .icon-trigger[data-active='true']:not(.icon-trigger-hero) {
+    background: var(--accent-subtle);
+    border-color: transparent;
+    color: var(--accent-gold);
+    box-shadow: none;
+    border-inline-start: 3px solid var(--accent-gold);
+    padding-inline-start: 8px;
+  }
+  .icon-trigger.icon-trigger-hero {
+    align-self: center;
+    margin: 4px 0 22px;
+  }
+  .icon-caption {
+    display: block;
+    font-size: 0.86rem;
+    font-weight: 500;
+    white-space: nowrap;
+  }
 }
 
 .badge-dot {
@@ -181,6 +340,13 @@ a { color: inherit; text-decoration: none; }
   background: var(--accent-gold);
   box-shadow: 0 0 6px var(--gold-glow);
 }
+@media (min-width: 900px) {
+  .icon-trigger:not(.icon-trigger-hero) .badge-dot {
+    position: static;
+    margin-inline-start: auto;
+  }
+}
+
 
 /* ==========================================================================
    النوافذ الزجاجية المنبثقة
@@ -189,7 +355,7 @@ a { color: inherit; text-decoration: none; }
   position: fixed;
   inset: 0;
   z-index: 25;
-  background: rgba(4, 3, 2, 0.25);
+  background: rgba(3, 3, 4, 0.35);
   cursor: default;
 }
 
@@ -202,11 +368,11 @@ a { color: inherit; text-decoration: none; }
   margin-inline: auto;
   z-index: 35;
   background: var(--glass);
-  backdrop-filter: blur(20px) saturate(1.2);
-  -webkit-backdrop-filter: blur(20px) saturate(1.2);
-  border: 1px solid rgba(229, 179, 66, 0.3);
-  border-radius: 18px;
-  box-shadow: 0 20px 50px -12px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(0, 0, 0, 0.2);
+  backdrop-filter: blur(20px) saturate(1.1);
+  -webkit-backdrop-filter: blur(20px) saturate(1.1);
+  border: 1px solid rgba(176, 141, 87, 0.25);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 20px 50px -12px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(0, 0, 0, 0.2);
   overflow: hidden;
   animation: popIn 0.22s var(--ease);
 }
@@ -264,7 +430,7 @@ a { color: inherit; text-decoration: none; }
 }
 .calendar-toggle button[aria-pressed='true'] {
   background: var(--gold-gradient);
-  color: #1a1209;
+  color: #14100a;
 }
 
 .stepper-row {
@@ -309,7 +475,7 @@ a { color: inherit; text-decoration: none; }
 .speed-label { font-size: 0.72rem; color: var(--text-muted); flex-shrink: 0; }
 .speed-chip {
   font-size: 0.72rem; font-weight: 600; color: var(--accent-gold);
-  background: var(--accent-subtle); border: 1px solid rgba(229, 179, 66, 0.25);
+  background: var(--accent-subtle); border: 1px solid rgba(176, 141, 87, 0.25);
   border-radius: 999px; padding: 3px 10px; min-width: 64px; text-align: center;
   white-space: nowrap; font-variant-numeric: tabular-nums;
 }
@@ -325,12 +491,12 @@ input[type='range'].slider {
 .slider::-webkit-slider-thumb {
   -webkit-appearance: none; appearance: none;
   width: 20px; height: 20px; margin-top: -8px; border-radius: 50%;
-  background: var(--gold-gradient); border: 2px solid #1a1209;
+  background: var(--gold-gradient); border: 2px solid #14100a;
   box-shadow: 0 0 0 1px var(--gold-border), 0 2px 8px rgba(0, 0, 0, 0.5);
 }
 .slider::-moz-range-track { height: 4px; border-radius: 999px; background: var(--border-hover); }
 .slider::-moz-range-progress { height: 4px; border-radius: 999px; background: var(--accent-gold); }
-.slider::-moz-range-thumb { width: 16px; height: 16px; border-radius: 50%; background: var(--accent-gold); border: 2px solid #1a1209; }
+.slider::-moz-range-thumb { width: 16px; height: 16px; border-radius: 50%; background: var(--accent-gold); border: 2px solid #14100a; }
 
 /* ==========================================================================
    حقول وأزرار عامة داخل النوافذ
@@ -340,7 +506,7 @@ input[type='range'].slider {
 
 .coord-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .coord-input {
-  width: 100%; height: 44px; border-radius: 12px;
+  width: 100%; height: 44px; border-radius: var(--radius-md);
   background: var(--bg-surface); border: 1px solid var(--border-color); color: var(--text-primary);
   padding: 0 12px; font-size: 0.92rem; font-variant-numeric: tabular-nums;
   direction: ltr; text-align: left;
@@ -350,7 +516,7 @@ input[type='range'].slider {
 
 .btn-wide {
   display: flex; align-items: center; justify-content: center; gap: 8px;
-  width: 100%; height: 44px; border-radius: 12px;
+  width: 100%; height: 44px; border-radius: var(--radius-md);
   background: var(--bg-surface); border: 1px solid var(--border-color);
   font-size: 0.84rem; font-weight: 600; color: var(--text-primary);
   transition: border-color 0.2s ease, background 0.2s ease, transform 0.15s ease;
@@ -360,21 +526,21 @@ input[type='range'].slider {
 
 .toggle-row {
   display: flex; align-items: center; gap: 10px;
-  width: 100%; height: 44px; padding: 0 14px; border-radius: 12px;
+  width: 100%; height: 44px; padding: 0 14px; border-radius: var(--radius-md);
   background: var(--bg-surface); border: 1px solid var(--border-color);
   font-size: 0.82rem; font-weight: 500; color: var(--text-secondary);
   transition: border-color 0.2s ease, background 0.2s ease, color 0.2s ease;
 }
 .toggle-row[aria-pressed='true'] {
   background: var(--accent-subtle);
-  border-color: rgba(229, 179, 66, 0.5);
+  border-color: rgba(176, 141, 87, 0.5);
   color: var(--accent-gold);
 }
 
 .layers-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
 .layer-tile {
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
-  height: 62px; border-radius: 14px;
+  height: 62px; border-radius: var(--radius-md);
   background: var(--bg-surface); border: 1px solid var(--border-color);
   color: var(--text-muted); font-size: 0.7rem; font-weight: 500;
   transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease, transform 0.15s ease;
@@ -382,9 +548,38 @@ input[type='range'].slider {
 .layer-tile:active { transform: scale(0.95); }
 .layer-tile[aria-pressed='true'] {
   background: var(--accent-subtle);
-  border-color: rgba(229, 179, 66, 0.5);
+  border-color: rgba(176, 141, 87, 0.5);
   color: var(--accent-gold);
-  box-shadow: inset 0 0 14px rgba(229, 179, 66, 0.08);
+  box-shadow: inset 0 0 14px rgba(176, 141, 87, 0.08);
+}
+
+/* ==========================================================================
+   شريط البحث عن نجم
+   ========================================================================== */
+.search-input {
+  width: 100%;
+  height: 44px;
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  padding: 0 14px;
+  font-size: 0.9rem;
+  direction: rtl;
+  text-align: right;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.search-input::placeholder { color: var(--text-muted); }
+.search-input:focus {
+  outline: none;
+  border-color: var(--accent-gold);
+  box-shadow: 0 0 0 3px var(--accent-subtle);
+}
+.search-empty {
+  text-align: center;
+  padding: 10px;
+  font-size: 0.8rem;
+  color: var(--text-muted);
 }
 
 /* ==========================================================================
@@ -415,7 +610,7 @@ input[type='range'].slider {
   justify-content: space-between;
   width: 100%;
   padding: 10px 14px;
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   font-size: 0.88rem;
   font-weight: 500;
   color: var(--text-secondary);
@@ -426,7 +621,7 @@ input[type='range'].slider {
 .select-item:hover { background: var(--bg-surface); }
 .select-item[aria-pressed='true'] {
   background: var(--accent-subtle);
-  border-color: rgba(229, 179, 66, 0.4);
+  border-color: rgba(176, 141, 87, 0.4);
   color: var(--accent-gold);
   font-weight: 700;
 }
@@ -476,7 +671,7 @@ input[type='range'].slider {
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   border: 1px solid var(--border-color);
-  border-radius: 16px;
+  border-radius: var(--radius-lg);
   padding: 4px 14px;
   display: flex;
   flex-direction: column;
@@ -486,13 +681,24 @@ input[type='range'].slider {
 .info-row { display: flex; align-items: center; gap: 10px; min-height: 36px; }
 .info-row + .info-row { border-top: 1px solid var(--border-color); }
 .badge { flex-shrink: 0; width: 24px; height: 24px; display: grid; place-items: center; border-radius: 8px; }
-.badge-sun { background: rgba(229, 179, 66, 0.16); color: var(--accent-gold); }
-.badge-moon { background: rgba(212, 195, 170, 0.12); color: var(--text-secondary); }
-.badge-time { background: rgba(124, 184, 125, 0.14); color: var(--success-ink); }
+.badge-sun { background: var(--accent-subtle); color: var(--accent-gold); }
+.badge-moon { background: rgba(170, 178, 189, 0.12); color: var(--text-secondary); }
+.badge-time { background: rgba(124, 154, 139, 0.14); color: var(--success-ink); }
 .info-label { flex-shrink: 0; width: 78px; font-size: 0.7rem; color: var(--text-muted); }
 .info-value { flex: 1; min-width: 0; font-size: 0.8rem; color: var(--text-primary); font-variant-numeric: tabular-nums; }
 
 @media (min-width: 900px) {
   .info-card { left: 20px; right: auto; bottom: 20px; width: 340px; }
-  .popover-panel { left: auto; right: auto; }
+
+  /* اللوحة الجانبية بعرض 240px تظهر عند بداية الاتجاه (يمين الشاشة في RTL)، فتُفتح النافذة
+     المنبثقة مباشرة عند نهايتها بدل انتصاف الشاشة كما في وضع الشريط العلوي للموبايل. */
+  .popover-panel {
+    top: 16px;
+    left: auto;
+    right: auto;
+    inset-inline-start: 256px;
+    inset-inline-end: auto;
+    margin-inline: 0;
+    max-width: 380px;
+  }
 }

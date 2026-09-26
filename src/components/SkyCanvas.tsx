@@ -45,6 +45,8 @@ export function SkyCanvas({ onFrame }: Props) {
       canvas.width = Math.round(rect.width * dpr);
       canvas.height = Math.round(rect.height * dpr);
       ctx!.setTransform(dpr, 0, 0, dpr, 0, 0);
+      // يُحدَّث فقط هنا (التركيب/تغيير الحجم) لا كل إطار — تستخدمه ميزة توسيط نتائج البحث
+      useSimulationStore.getState().setViewportSize(rect.width, rect.height);
     }
     resize();
     window.addEventListener('resize', resize);
@@ -93,6 +95,7 @@ export function SkyCanvas({ onFrame }: Props) {
         layers: currentState.layers,
         selectedZodiacs: currentState.selectedZodiacs,
         selectedMansionIndices: currentState.selectedMansionIndices,
+        selectedGroupIds: currentState.selectedGroupIds,
         calibration: currentState.calibration,
         sceneRotationDeg: currentState.sceneRotationDeg,
         panX: currentState.panX,
