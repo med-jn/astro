@@ -2,6 +2,7 @@ import { useState, type CSSProperties, type ElementType } from 'react';
 import {
   Play, Pause, Clock, MapPinned, LocateFixed, Globe2, Contrast, Orbit, Route, Radar,
   CircleDot, Star, Disc, Tag, Compass, Sparkles, X, Plus, Minus, RotateCcw, Moon,
+  Grid3x3, Clock3, Telescope,
 } from 'lucide-react';
 import { SPEED_LABELS_AR, useSimulationStore, type LayerToggles } from '../state/store';
 import { ZODIAC_ORDER, type ZodiacKey } from '../core/zodiac';
@@ -38,18 +39,21 @@ const LAYER_ICONS: Record<keyof LayerToggles, ElementType> = {
   land: Globe2, terminator: Contrast, tropics: Orbit, meridians: Route,
   equatorialGrid: Radar, mansions: Sparkles, ecliptic: CircleDot,
   stars: Star, planets: Disc, labels: Tag, observerMarker: MapPinned,
+  gridFull: Grid3x3, timeZones: Clock3, observerDome: Telescope,
 };
 
 const LAYER_TITLES: Record<keyof LayerToggles, string> = {
-  land: 'الأرض', terminator: 'ظل الليل والنهار', tropics: 'المدارات الثلاثة', meridians: 'خطوط الطول',
+  land: 'الأرض', terminator: 'ظل الليل والنهار', tropics: 'المدارات الثلاثة', meridians: 'الشبكة الجغرافية (كل 10°)',
   equatorialGrid: 'الشبكة الاستوائية', mansions: 'منازل القمر', ecliptic: 'خط البروج',
   stars: 'النجوم', planets: 'الكواكب', labels: 'الأسماء', observerMarker: 'موقعي',
+  gridFull: 'الشبكة الكاملة (كل درجة)', timeZones: 'خطوط التوقيت العالمية', observerDome: 'قبة الراصد',
 };
 
 const LAYER_CAPTIONS: Record<keyof LayerToggles, string> = {
-  land: 'أرض', terminator: 'ظل', tropics: 'مدارات', meridians: 'طول',
+  land: 'أرض', terminator: 'ظل', tropics: 'مدارات', meridians: '10°',
   equatorialGrid: 'شبكة', mansions: 'منازل', ecliptic: 'بروج',
   stars: 'نجوم', planets: 'كواكب', labels: 'أسماء', observerMarker: 'موقعي',
+  gridFull: '1°', timeZones: 'توقيت', observerDome: 'قبة',
 };
 
 /** تسميات نصية تظهر تحت الأيقونات الرئيسية على سطح المكتب فقط (انظر .icon-caption في index.css) */
@@ -63,7 +67,7 @@ const MAIN_CAPTIONS = {
   mansions: 'المنازل',
 } as const;
 
-const GROUND_KEYS: (keyof LayerToggles)[] = ['land', 'terminator', 'tropics', 'meridians', 'equatorialGrid', 'ecliptic'];
+const GROUND_KEYS: (keyof LayerToggles)[] = ['land', 'terminator', 'tropics', 'meridians', 'gridFull', 'timeZones', 'equatorialGrid', 'ecliptic'];
 const SKY_KEYS: (keyof LayerToggles)[] = ['stars', 'planets'];
 
 type PopoverKey = 'time' | 'observer' | 'ground' | 'sky' | 'zodiac' | 'mansions' | null;
@@ -96,15 +100,16 @@ export function ControlsPanel() {
   const [calendarMode, setCalendarMode] = useState<'gregorian' | 'hijri'>('gregorian');
 
   const {
-    date, isPlaying, speedIndex, observer, layers,
+    date, isPlaying, speedIndex, observer, layers, timeZoneKind,
     selectedZodiacs, selectedMansionIndices,
     setDate, togglePlay, resetToNow, setSpeedIndex, setObserver, toggleLayer,
     toggleZodiacSelection, clearZodiacSelection, toggleMansionSelection, clearMansionSelection,
+    setTimeZoneKind,
   } = useSimulationStore();
 
   const toggle = (key: PopoverKey) => setOpenPopover((prev) => (prev === key ? null : key));
 
-  const hasGroundExtra = layers.tropics || layers.meridians || layers.equatorialGrid || layers.ecliptic;
+  const hasGroundExtra = layers.tropics || layers.meridians || layers.gridFull || layers.timeZones || layers.equatorialGrid || layers.ecliptic;
   const hasSkyExtra = layers.stars || layers.planets;
   const hasZodiacExtra = selectedZodiacs.length > 0;
   const hasMansionExtra = selectedMansionIndices.length > 0 || layers.mansions;
@@ -207,6 +212,7 @@ export function ControlsPanel() {
               <button className="icon-trigger" data-active={openPopover === 'observer'} onClick={() => toggle('observer')} title="الموقع والإحداثيات">
                 <MapPinned size={19} />
                 <span className="icon-caption">{MAIN_CAPTIONS.observer}</span>
+                {layers.observerDome && <span className="badge-dot" />}
               </button>
               {openPopover === 'observer' && (
                 <div className="popover-panel" role="dialog" aria-label="الموقع والإحداثيات">
@@ -243,6 +249,10 @@ export function ControlsPanel() {
                       <MapPinned size={16} />
                       <span>إظهار علامة موقعي على الخريطة</span>
                     </button>
+                    <button className="toggle-row" aria-pressed={layers.observerDome} onClick={() => toggleLayer('observerDome')}>
+                      <Telescope size={16} />
+                      <span>قبة الراصد (السماء فوق موقعي)</span>
+                    </button>
                   </div>
                 </div>
               )}
@@ -271,6 +281,12 @@ export function ControlsPanel() {
                         <LayerTile key={k} layerKey={k} active={layers[k]} onToggle={() => toggleLayer(k)} />
                       ))}
                     </div>
+                    {layers.timeZones && (
+                      <div className="calendar-toggle" role="group" aria-label="نوع خطوط التوقيت">
+                        <button aria-pressed={timeZoneKind === 'nominal'} onClick={() => setTimeZoneKind('nominal')}>خطوط 15°</button>
+                        <button aria-pressed={timeZoneKind === 'legal'} onClick={() => setTimeZoneKind('legal')}>المناطق الفعلية</button>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}

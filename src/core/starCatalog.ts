@@ -1,4 +1,5 @@
-import { supabase } from './supabaseClient';
+import { fetchAllRows } from './supabaseClient';
+import { arabicBayerLabel } from './conNames';
 
 export interface CatalogStar {
   id: number;
@@ -18,6 +19,7 @@ export interface CatalogStar {
 // ملاحظة: حقل id هنا هو المعرّف الداخلي لقاعدة HYG، وليس رقم Hipparcos الحقيقي —
 // جدول stars في Supabase مربوط بنفس أرقام id هذه (رغم تسمية عموده "hip" تاريخياً).
 let cachedCatalog: CatalogStar[] = [];
+let starByIdMap: Map<number, CatalogStar> = new Map();
 let loadPromise: Promise<CatalogStar[]> | null = null;
 
 export function loadStarCatalog(): Promise<CatalogStar[]> {
@@ -26,6 +28,7 @@ export function loadStarCatalog(): Promise<CatalogStar[]> {
     .then((res) => res.json())
     .then((data: CatalogStar[]) => {
       cachedCatalog = data;
+      starByIdMap = new Map(data.map((s) => [s.id, s]));
       return data;
     })
     .catch((err) => {
@@ -37,6 +40,15 @@ export function loadStarCatalog(): Promise<CatalogStar[]> {
 
 export function getLoadedStars(): CatalogStar[] {
   return cachedCatalog;
+}
+
+/** فهرس id → نجم، يُبنى مرة واحدة عند تحميل الكتالوج (بدل إعادة بنائه كل إطار رسم) */
+export function getStarByIdMap(): Map<number, CatalogStar> {
+  return starByIdMap;
+}
+
+export function getStarById(id: number): CatalogStar | undefined {
+  return starByIdMap.get(id);
 }
 
 // ===================== الإثراء العربي (Supabase) =====================
@@ -62,17 +74,13 @@ export function loadArabicEnrichment(): Promise<void> {
   if (arabicLoadPromise) return arabicLoadPromise;
   arabicLoadPromise = (async () => {
     try {
-      const [{ data: starsData, error: starsErr }, { data: aliasData, error: aliasErr }] =
-        await Promise.all([
-          supabase.from('stars').select('hip, name_ar').not('name_ar', 'is', null),
-          supabase.from('star_aliases').select('hip, alias_ar, source').order('id', { ascending: true }),
-        ]);
-
-      if (starsErr) throw starsErr;
-      if (aliasErr) throw aliasErr;
+      const [starsData, aliasData] = await Promise.all([
+        fetchAllRows<{ hip: number; name_ar: string | null }>('stars', 'hip, name_ar', ['hip'], { notNull: 'name_ar' }),
+        fetchAllRows<{ hip: number; alias_ar: string; source: string }>('star_aliases', 'hip, alias_ar, source', ['id']),
+      ]);
 
       const altByHip = new Map<number, ArabicAltName[]>();
-      for (const row of aliasData ?? []) {
+      for (const row of aliasData) {
         const list = altByHip.get(row.hip) ?? [];
         list.push({ name: row.alias_ar, source: row.source });
         altByHip.set(row.hip, list);
@@ -80,13 +88,13 @@ export function loadArabicEnrichment(): Promise<void> {
 
       // إحصاء تكرار كل اسم عربي لمعرفة أي الأسماء "جماعية" (تخص أكثر من نجم واحد)
       const nameCounts = new Map<string, number>();
-      for (const row of starsData ?? []) {
+      for (const row of starsData) {
         if (!row.name_ar) continue;
         nameCounts.set(row.name_ar, (nameCounts.get(row.name_ar) ?? 0) + 1);
       }
 
       const map = new Map<number, ArabicEnrichment>();
-      for (const row of starsData ?? []) {
+      for (const row of starsData) {
         if (!row.name_ar) continue;
         map.set(row.hip, {
           nameAr: row.name_ar,
@@ -152,6 +160,9 @@ export function getStarDisplayName(star: CatalogStar): string | null {
     return ar.nameAr;
   }
   if (star.name) return star.name;
+  // نجم بلا اسم خاص: «ألفا العقرب» / «12 الدب الأكبر» ديناميكياً من bayer/flam + اسم الكوكبة (بلا تخزين)
+  const arLabel = arabicBayerLabel(star.bayer, star.flam, star.con);
+  if (arLabel) return arLabel;
   if (star.bayer && star.con) return `${star.bayer} ${star.con}`;
   return null;
 }

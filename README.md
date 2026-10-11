@@ -27,9 +27,11 @@ ASTRO
 │  │  ├─ ControlsPanel.tsx
 │  │  ├─ InfoCard.tsx
 │  │  ├─ MapCalibrator.tsx
-│  │  └─ SkyCanvas.tsx
+│  │  ├─ SkyCanvas.tsx
+│  │  └─ StarSearchBar.tsx
 │  ├─ core
 │  │  ├─ bodies.ts
+│  │  ├─ conNames.ts
 │  │  ├─ contentRegistry.ts
 │  │  ├─ earthImage.ts
 │  │  ├─ eclipticTransform.ts
@@ -38,9 +40,12 @@ ASTRO
 │  │  ├─ observer.ts
 │  │  ├─ projection.ts
 │  │  ├─ starCatalog.ts
+│  │  ├─ starGroups.ts
+│  │  ├─ starSearch.ts
 │  │  ├─ supabaseClient.ts
 │  │  ├─ terminator.ts
-│  │  └─ zodiac.ts
+│  │  ├─ zodiac.ts
+│  │  └─ zodiacNamesAr.ts
 │  ├─ index.css
 │  ├─ main.tsx
 │  ├─ render

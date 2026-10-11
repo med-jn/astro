@@ -5,7 +5,8 @@ import { ZODIAC_ORDER, type ZodiacKey } from './zodiac';
 import { getZodiacNameAr, getZodiacLongitudeRange } from './zodiacNamesAr';
 import { getAllLunarMansions, MANSION_SPAN_DEG } from './mansions';
 import { eclipticLongitudeToEquatorial, getMeanObliquityDeg } from './eclipticTransform';
-import { getAllLoadedGroups, computeGroupCenter } from './starGroups';
+import { getGMSTDeg } from './bodies';
+import { getConstellationGroups, getGroupAliases, computeGroupCenter } from './starGroups';
 
 /** تبسيط عربي خفيف للمقارنة: إزالة التشكيل وتوحيد أشكال الألف/الياء/التاء المربوطة */
 function normalizeArabic(input: string): string {
@@ -118,12 +119,13 @@ function searchGroups(query: string): SearchResult[] {
   const q = normalizeArabic(query);
   const results: SearchResult[] = [];
 
-  for (const group of getAllLoadedGroups()) {
-    const candidates = [group.nameAr, group.nameEn ?? '', group.iauCon ?? ''];
+  // الكوكبات الـ88 فقط (تستثني مجموعات نجوم المنازل القمرية) + الأسماء البديلة من group_aliases
+  for (const group of getConstellationGroups()) {
+    const candidates = [group.nameAr, group.nameEn ?? '', group.iauCon ?? '', ...getGroupAliases(group.id)];
     if (!candidates.some((c) => normalizeArabic(c).includes(q))) continue;
 
     const center = computeGroupCenter(group.id);
-    if (!center) continue; // لا نجوم أعضاء مطابقة في الكتالوج المحلي بعد — لا مركز موثوق
+    if (!center) continue;
 
     results.push({
       kind: 'group', id: `group:${group.id}`, label: `${group.nameAr} (كوكبة)`,
@@ -132,6 +134,59 @@ function searchGroups(query: string): SearchResult[] {
   }
 
   return results;
+}
+
+/**
+ * البرج والكوكبة الفلكيان شيء واحد: البرج هو الكوكبة التي تعبرها الدائرة الكسوفية، ونجومه
+ * هي نجوم الكوكبة نفسها. لذا يُدمجان في نتيجة واحدة (تُوسَّط على مركز الكوكبة) تحمل zodiacKey
+ * ليبقى مدى البرج على الكسوف متاحاً لمن يحتاجه.
+ */
+function mergeZodiacIntoGroups(zodiacs: SearchResult[], groups: SearchResult[]): SearchResult[] {
+  // الربط بين البرج والكوكبة بالرمز IAU (Vir ↔ Virgo ...) لا بالاسم، فلا يتأثر باختلاف التسمية
+  const byCon = new Map<string, number>();
+  for (const g of getConstellationGroups()) {
+    if (g.iauCon) byCon.set(g.iauCon.toLowerCase(), g.id);
+  }
+  const groupIdOfZodiac = (key: string): number | undefined => {
+    const k = key.toLowerCase();
+    for (const [con, id] of byCon) if (k.startsWith(con)) return id;
+    return undefined;
+  };
+  const zodiacKeyOfGroup = new Map<number, string>();
+  ZODIAC_ORDER.forEach((key: ZodiacKey) => {
+    const id = groupIdOfZodiac(key);
+    if (id != null) zodiacKeyOfGroup.set(id, key);
+  });
+
+  const out = new Map<number, SearchResult>();
+  const rest: SearchResult[] = [];
+  const add = (groupId: number, zodiacKey?: string) => {
+    if (out.has(groupId)) return;
+    const base = groups.find((g) => g.groupId === groupId);
+    let r = base;
+    if (!r) {
+      const grp = getConstellationGroups().find((x) => x.id === groupId);
+      const c = grp && computeGroupCenter(groupId);
+      if (!grp || !c) return;
+      r = { kind: 'group', id: `group:${groupId}`, label: grp.nameAr, centerRaHours: c.raHours, centerDecDeg: c.decDeg, groupId };
+    }
+    const merged: SearchResult = { ...r };
+    if (zodiacKey) {
+      merged.zodiacKey = zodiacKey as ZodiacKey;
+      merged.label = merged.label.replace(/\s*\(.*\)\s*$/, '') + ' (برج وكوكبة)';
+    }
+    out.set(groupId, merged);
+  };
+
+  for (const z of zodiacs) {
+    const gid = z.zodiacKey ? groupIdOfZodiac(z.zodiacKey) : undefined;
+    if (gid != null) add(gid, z.zodiacKey);
+    else rest.push(z);
+  }
+  for (const g of groups) {
+    if (g.groupId != null) add(g.groupId, zodiacKeyOfGroup.get(g.groupId));
+  }
+  return [...rest, ...out.values()];
 }
 
 /**
@@ -150,7 +205,8 @@ export function searchAll(query: string, date: Date, limit = 12): SearchResult[]
   const groupResults = searchGroups(q);
   const starResults = searchStars(q, limit);
 
-  return [...zodiacResults, ...mansionResults, ...groupResults, ...starResults].slice(0, limit);
+  const merged = mergeZodiacIntoGroups(zodiacResults, groupResults);
+  return [...merged, ...mansionResults, ...starResults].slice(0, limit);
 }
 
 export interface CenterPanDelta {
@@ -176,7 +232,7 @@ export function computeCenterPanDelta(
   viewportHeight: number
 ): CenterPanDelta {
   const time = Astronomy.MakeTime(date);
-  const gmstDeg = Astronomy.SiderealTime(time) * 15;
+  const gmstDeg = getGMSTDeg(time); // نفس دالة skyRenderer تماماً، فلا انزياح بين التوسيط والرسم
 
   const outerRadiusPx = computeOuterRadiusPx(viewportWidth, viewportHeight, targetZoomScale);
   const centerX = viewportWidth / 2;

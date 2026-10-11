@@ -19,3 +19,28 @@ if (!supabaseUrl || !supabaseAnonKey) {
 }
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+/**
+ * يجلب كل صفوف جدول على دفعات: Supabase يقصّ أي استعلام عند 1000 صف افتراضياً دون أي خطأ،
+ * وجدولا group_stars وgroup_lines يتجاوزان ذلك، فكانت بعض الكوكبات تُرسم ناقصة بصمت.
+ * orderBy يجب أن يكون فريداً (أو مركّباً) ليبقى الترقيم الصفحي ثابتاً.
+ */
+export async function fetchAllRows<T>(
+  table: string,
+  columns: string,
+  orderBy: string[],
+  opts: { notNull?: string; pageSize?: number } = {}
+): Promise<T[]> {
+  const pageSize = opts.pageSize ?? 1000;
+  const out: T[] = [];
+  for (let from = 0; ; from += pageSize) {
+    let q = supabase.from(table).select(columns);
+    if (opts.notNull) q = q.not(opts.notNull, 'is', null);
+    for (const col of orderBy) q = q.order(col, { ascending: true });
+    const { data, error } = await q.range(from, from + pageSize - 1);
+    if (error) throw error;
+    const rows = (data ?? []) as unknown as T[];
+    out.push(...rows);
+    if (rows.length < pageSize) break;
+  }
+  return out;
+}

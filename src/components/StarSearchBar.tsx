@@ -36,17 +36,25 @@ export function StarSearchBar() {
 
     if (!afterZoom.layers.labels) afterZoom.toggleLayer('labels');
 
-    if (result.kind === 'star') {
+    // أي بحث جديد يستبدل التحديد السابق كلياً (كوكبة/علامة نجمة قديمة) فلا تبقى بطاقة قديمة
+    if (result.kind === 'star' && result.star) {
       if (!afterZoom.layers.stars) afterZoom.toggleLayer('stars');
+      // يحدّد النجمة (علامة التصويب) ويُبرز كوكبتها بخطوطها
+      afterZoom.focusStar(result.star.id);
     } else if (result.kind === 'zodiac' && result.zodiacKey) {
+      afterZoom.focusStar(null);
       afterZoom.clearZodiacSelection();
       afterZoom.toggleZodiacSelection(result.zodiacKey);
     } else if (result.kind === 'mansion' && result.mansionIndex !== undefined) {
+      afterZoom.focusStar(null);
       afterZoom.clearMansionSelection();
       afterZoom.toggleMansionSelection(result.mansionIndex);
     } else if (result.kind === 'group' && result.groupId !== undefined) {
-      afterZoom.clearGroupSelection();
+      afterZoom.focusStar(null);
       afterZoom.toggleGroupSelection(result.groupId);
+      // نتيجة «برج وكوكبة» مدموجة: يُبرَز مدى البرج على الكسوف أيضاً
+      afterZoom.clearZodiacSelection();
+      if (result.zodiacKey) afterZoom.toggleZodiacSelection(result.zodiacKey);
     }
 
     setOpen(false);

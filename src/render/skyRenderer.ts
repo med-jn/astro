@@ -19,11 +19,18 @@ import {
   PLANET_COLORS,
   PLANET_LABELS_AR,
 } from '../core/bodies';
-import { getLoadedStars, getStarColor, getStarRadiusPx, getStarDisplayName } from '../core/starCatalog';
+import { getLoadedStars, getStarColor, getStarRadiusPx, getStarDisplayName, getStarByIdMap } from '../core/starCatalog';
 import { getLoadedZodiac, type ZodiacKey } from '../core/zodiac';
 import { getGroupLines, getGroupById, computeGroupCenter } from '../core/starGroups';
-import { getEarthImage, isEarthImageLoaded, loadEarthImage } from '../core/earthImage';
-import { fitPixelsPerColatitude, greenwichBearingDeg, type MapCalibration } from '../core/mapCalibration';
+import { getEarthImage, EARTH_IMAGE_MAX_RADIUS_PX } from '../core/earthImage';
+import {
+  drawEarthVectorSmart, drawTimeZoneBoundaries, ensureEarthVectorLoading, ensureTimeZonesLoading,
+  isEarthVectorReady, type ViewportInfo,
+} from '../core/vectorMap';
+import { drawGeoGrid, drawNominalTimeZones, TIMEZONE_COLOR } from './geoGrid';
+import { drawNightShadingSmooth } from './nightShade';
+import { drawObserverDome, type DomeTarget } from './observerDome';
+import { fillTextUpright, setSceneRotationRad } from './uprightText';
 import { getContent, getContentId } from '../core/contentRegistry';
 
 export interface RenderInput {
@@ -37,10 +44,13 @@ export interface RenderInput {
   selectedMansionIndices: number[];
   /** معرّفات الكوكبات (groups) المُبرزة حالياً — تُرسَم بخطوطها الحقيقية بين نجومها */
   selectedGroupIds: number[];
-  calibration: MapCalibration | null;
+  /** النجمة المحدَّدة من البحث (id داخلي) — تُحاط بعلامة تصويب رباعية */
+  highlightedStarId?: number | null;
   sceneRotationDeg?: number;
   panX?: number;
   panY?: number;
+  /** نوع خطوط التوقيت: اسمية (24 خطاً كل 15°) أو حدود المناطق الزمنية الفعلية للدول */
+  timeZoneKind?: 'nominal' | 'legal';
 }
 
 export interface HitTarget {
@@ -61,6 +71,19 @@ export interface RenderOutput {
 }
 
 const TROPIC_OBLIQUITY = 23.4367;
+
+/** أقصى تكبير تنمو معه أحجام الخطوط والنصوص والنقاط (يطابق السلوك السابق حتى 6x). فوقه تبقى
+ *  الأحجام ثابتة، وإلا صار الخط 160px والشمس بحجم الشاشة عند 100x. الهندسة نفسها (القرص) تكبر بلا حد. */
+const UI_ZOOM_CAP = 6;
+/** الانتقال من الصورة إلى الرسم المتجهي يتحدد بدقة الصورة نفسها لا برقم تكبير ثابت:
+ *  النسبة = (نصف قطر القرص بكسل الجهاز) ÷ (نصف قطر أكبر صورة). تحت ~0.85 الصورة كافية وأخف،
+ *  وفوق ~1.25 تصبح مبكسلة فيحل المتجه محلها كلياً. وهكذا يبدأ المتجه متأخراً على الشاشات الكبيرة
+ *  ومبكراً على الشاشات عالية الكثافة، ولا يُحمَّل شيء قبل أن يلزم. */
+const VECTOR_LOAD_RATIO = 0.4;
+const VECTOR_FADE_START_RATIO = 0.85;
+const VECTOR_FADE_END_RATIO = 1.25;
+/** 'smooth' = تظليل تحليلي ناعم يصلح لأي تكبير، 'legacy' = الخلايا القطبية القديمة (core/terminator) */
+const NIGHT_SHADING_MODE: 'smooth' | 'legacy' = 'smooth';
 const SPACE_COLOR = '#000000';
 
 /** لون التمييز الوحيد للخطوط والإبرازات — برونز مطفأ، بلا تعدد ألوان صاخب */
@@ -78,8 +101,8 @@ export function renderSky(
   input: RenderInput
 ): RenderOutput {
   const {
-    date, observer, zoomScale, layers, selectedZodiacs, selectedMansionIndices, selectedGroupIds,
-    calibration, sceneRotationDeg = 0, panX = 0, panY = 0,
+    date, observer, zoomScale, layers, selectedZodiacs, selectedMansionIndices, selectedGroupIds, highlightedStarId = null,
+    sceneRotationDeg = 0, panX = 0, panY = 0, timeZoneKind = 'nominal',
   } = input;
   const time = Astronomy.MakeTime(date);
   const gmstDeg = getGMSTDeg(time);
@@ -89,10 +112,17 @@ export function renderSky(
   const centerY = height / 2;
   const outerRadiusPx = computeOuterRadiusPx(width, height, zoomScale);
   const config: PolarMapConfig = { centerX, centerY, outerRadiusPx };
-  const pxPerDeg = outerRadiusPx / 180;
+  // الأحجام المرئية (خطوط/نصوص/نقاط/الشمس والقمر) تتبع uiScale المحدود، أما القرص فيتبع zoomScale
+  const uiScale = Math.min(zoomScale, UI_ZOOM_CAP);
+  const pxPerDeg = computeOuterRadiusPx(width, height, uiScale) / 180;
+  setSceneRotationRad((sceneRotationDeg * Math.PI) / 180);
 
   const panXpx = panX * outerRadiusPx;
   const panYpx = panY * outerRadiusPx;
+  // مركز القرص الفعلي على الشاشة (القطب الشمالي): ينزاح مع التحريك، فيتحرك القرص كله (الخريطة
+  // + دائرة القص + إطار الحافة) معاً كما في Google Earth بدل أن تنزاح الخريطة تحت دائرة ثابتة.
+  const discCenterX = centerX + panXpx;
+  const discCenterY = centerY + panYpx;
 
   const sun = getSunState(time, observer);
   const moon = getMoonState(time, observer);
@@ -118,7 +148,7 @@ export function renderSky(
 
   ctx.save();
   ctx.beginPath();
-  ctx.arc(centerX, centerY, outerRadiusPx, 0, Math.PI * 2);
+  ctx.arc(discCenterX, discCenterY, outerRadiusPx, 0, Math.PI * 2);
   ctx.clip();
 
   ctx.save();
@@ -127,44 +157,64 @@ export function renderSky(
   ctx.rotate((sceneRotationDeg * Math.PI) / 180);
   ctx.translate(-centerX, -centerY);
 
-  if (layers.land && calibration) {
-    loadEarthImage();
-    if (isEarthImageLoaded()) drawCalibratedEarthImage(ctx, calibration, config);
-  }
+  const viewport: ViewportInfo = { width, height, sceneRotationDeg, panXpx, panYpx };
+
+  if (layers.land) drawLand(ctx, config, viewport);
 
   if (layers.terminator) {
-    drawNightShading(ctx, subsolar.lat, subsolar.lon, config);
+    if (NIGHT_SHADING_MODE === 'smooth') drawNightShadingSmooth(ctx, subsolar.lat, subsolar.lon, config);
+    else drawNightShading(ctx, subsolar.lat, subsolar.lon, config);
   }
 
-  if (layers.tropics) drawTropics(ctx, config, layers.labels, zoomScale);
-  if (layers.meridians) drawMeridians(ctx, config, layers.labels, zoomScale);
-  if (layers.equatorialGrid) drawEquatorialGrid(ctx, gmstDeg, config, zoomScale);
-  if (layers.ecliptic) drawEclipticLine(ctx, obliquityDeg, gmstDeg, config, zoomScale);
+  if (layers.meridians || layers.gridFull) {
+    drawGeoGrid(ctx, config, { ten: layers.meridians, full: layers.gridFull, labels: layers.labels }, uiScale);
+  }
+  if (layers.tropics) drawTropics(ctx, config, layers.labels, uiScale);
+  if (layers.timeZones) drawTimeZones(ctx, config, viewport, timeZoneKind, uiScale);
+  if (layers.equatorialGrid) drawEquatorialGrid(ctx, gmstDeg, config, uiScale);
+  if (layers.ecliptic) drawEclipticLine(ctx, obliquityDeg, gmstDeg, config, uiScale);
 
-  if (layers.mansions) drawLunarMansions(ctx, obliquityDeg, gmstDeg, config, layers.labels, zoomScale);
+  if (layers.mansions) drawLunarMansions(ctx, obliquityDeg, gmstDeg, config, layers.labels, uiScale);
   if (selectedMansionIndices.length) {
-    drawSelectedMansions(ctx, obliquityDeg, gmstDeg, config, selectedMansionIndices, zoomScale);
+    drawSelectedMansions(ctx, obliquityDeg, gmstDeg, config, selectedMansionIndices, uiScale);
   }
 
-  if (layers.stars) drawStars(ctx, gmstDeg, config, layers.labels, zoomScale, selectedZodiacs.length > 0);
-  if (selectedZodiacs.length) drawSelectedZodiacLines(ctx, selectedZodiacs, gmstDeg, config, zoomScale);
-  if (selectedGroupIds.length) drawSelectedGroups(ctx, selectedGroupIds, gmstDeg, config, zoomScale);
+  if (layers.stars) drawStars(ctx, gmstDeg, config, layers.labels, uiScale, selectedZodiacs.length > 0);
+  if (selectedZodiacs.length) drawSelectedZodiacLines(ctx, selectedZodiacs, gmstDeg, config, uiScale);
+  if (selectedGroupIds.length) drawSelectedGroups(ctx, selectedGroupIds, gmstDeg, config, uiScale);
 
-  if (layers.planets) drawPlanets(ctx, planets, gmstDeg, config, layers.labels, zoomScale, time);
+  if (highlightedStarId != null) drawStarReticle(ctx, highlightedStarId, gmstDeg, config, uiScale);
+
+  if (layers.planets) drawPlanets(ctx, planets, gmstDeg, config, layers.labels, uiScale, time);
 
   drawSun(ctx, sunScreenP, sunRadiusPx);
   drawMoon(ctx, moon, moonScreenP, sunScreenP, moonRadiusPx);
 
-  if (layers.observerMarker) drawObserverMarker(ctx, observer, config, layers.labels, zoomScale);
+  if (layers.observerMarker) drawObserverMarker(ctx, observer, config, layers.labels, uiScale);
+
+  // قبة الراصد فوق كل شيء: سماؤه المحلية بكل الأجرام، وتدور مع المشهد (أسماؤها تبقى أفقية)
+  let domeTargets: DomeTarget[] = [];
+  if (layers.observerDome) {
+    domeTargets = drawObserverDome(
+      ctx, config,
+      {
+        observer, gmstDeg, obliquityDeg, sun, moon, planets,
+        selectedZodiacs, selectedMansionIndices, selectedGroupIds, highlightedStarId,
+        showEcliptic: layers.ecliptic, showMansionNames: layers.mansions && layers.labels, labels: layers.labels,
+      },
+      uiScale,
+      { drawSun, drawMoon, drawPlanetDot }
+    );
+  }
 
   ctx.restore();
   ctx.restore();
 
   ctx.save();
   ctx.strokeStyle = 'rgba(226, 232, 240, 0.5)';
-  ctx.lineWidth = 3 * zoomScale;
+  ctx.lineWidth = 3 * uiScale;
   ctx.beginPath();
-  ctx.arc(centerX, centerY, outerRadiusPx, 0, Math.PI * 2);
+  ctx.arc(discCenterX, discCenterY, outerRadiusPx, 0, Math.PI * 2);
   ctx.stroke();
   ctx.restore();
 
@@ -173,24 +223,56 @@ export function renderSky(
     sceneRotationDeg, panXpx, panYpx
   );
 
+  if (layers.observerDome && layers.labels) {
+    for (const t of domeTargets) {
+      const s = applySceneTransform({ x: t.x, y: t.y, visible: true }, centerX, centerY, sceneRotationDeg, panXpx, panYpx);
+      hitTargets.push({ x: s.x, y: s.y, name: t.name, detail: t.detail });
+    }
+  }
+
   return { sun, moon, planets, gmstDeg, hitTargets };
 }
 
 // ============================= طبقات الرسم =============================
 
-function drawCalibratedEarthImage(ctx: CanvasRenderingContext2D, calibration: MapCalibration, config: PolarMapConfig) {
-  const img = getEarthImage();
+/** صورة 8K عند التصغير، والرسم المتجهي (دقة غير محدودة) عند التقريب، مع انتقال تدريجي بينهما */
+function drawLand(ctx: CanvasRenderingContext2D, config: PolarMapConfig, vp: ViewportInfo) {
+  const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
+  const ratio = (config.outerRadiusPx * dpr) / EARTH_IMAGE_MAX_RADIUS_PX;
+  if (ratio >= VECTOR_LOAD_RATIO) ensureEarthVectorLoading();
+  const alpha = Math.min(1, Math.max(0, (ratio - VECTOR_FADE_START_RATIO) / (VECTOR_FADE_END_RATIO - VECTOR_FADE_START_RATIO)));
+  if (alpha <= 0 || !isEarthVectorReady()) {
+    drawEarthMap(ctx, config);
+    return;
+  }
+  drawEarthVectorSmart(ctx, config, vp, alpha, () => drawEarthMap(ctx, config));
+}
+
+function drawTimeZones(
+  ctx: CanvasRenderingContext2D, config: PolarMapConfig, vp: ViewportInfo,
+  kind: 'nominal' | 'legal', uiScale: number
+) {
+  if (kind === 'legal') {
+    ensureTimeZonesLoading();
+    // أثناء تحميل البيانات (أو تعذره) نعرض الخطوط الاسمية بدل شاشة فارغة
+    if (drawTimeZoneBoundaries(ctx, config, vp, TIMEZONE_COLOR, 1.3 * Math.min(uiScale, 2.5))) return;
+  }
+  drawNominalTimeZones(ctx, config, vp, uiScale);
+}
+
+/**
+ * خريطة الأرض المولَّدة: مركزها مركز القبة ونصف قطرها outerRadiusPx، فتُرسم في مربع القبة مباشرة.
+ * (التوليد في scripts/build-world-map.mjs بنفس معادلات latLonToScreen — لا معايرة ولا إزاحات.)
+ */
+function drawEarthMap(ctx: CanvasRenderingContext2D, config: PolarMapConfig) {
+  const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
+  const img = getEarthImage(config.outerRadiusPx * 2 * dpr);
   if (!img) return;
-  const imagePxPerColat = fitPixelsPerColatitude(calibration);
-  const ourPxPerColat = config.outerRadiusPx / 180;
-  const scale = ourPxPerColat / imagePxPerColat;
-  const bearingDeg = greenwichBearingDeg(calibration) + calibration.rotationNudgeDeg + 180;
+  const r = config.outerRadiusPx;
   ctx.save();
-  ctx.translate(config.centerX, config.centerY);
-  ctx.rotate((-bearingDeg * Math.PI) / 180);
-  if (calibration.mirrored) ctx.scale(-1, 1);
-  ctx.scale(scale, scale);
-  ctx.drawImage(img, -calibration.poleP.x, -calibration.poleP.y);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(img, config.centerX - r, config.centerY - r, r * 2, r * 2);
   ctx.restore();
 }
 
@@ -216,37 +298,10 @@ function drawTropics(ctx: CanvasRenderingContext2D, config: PolarMapConfig, show
       ctx.fillStyle = color;
       ctx.font = `bold ${9 * zoomScale}px system-ui, sans-serif`;
       ctx.textAlign = 'left';
-      ctx.fillText(label, config.centerX + 4, config.centerY - r - 4);
+      fillTextUpright(ctx, label, config.centerX, config.centerY - r, 4, -4);
     }
   });
   ctx.globalAlpha = 1;
-  ctx.restore();
-}
-
-function drawMeridians(ctx: CanvasRenderingContext2D, config: PolarMapConfig, showLabels: boolean, zoomScale: number) {
-  const count = 24;
-  const path = new Path2D();
-  const labels: { x: number; y: number; text: string }[] = [];
-  for (let i = 0; i < count; i++) {
-    const lon = (360 / count) * i;
-    const edge = latLonToScreen(-90, lon, config);
-    path.moveTo(config.centerX, config.centerY);
-    path.lineTo(edge.x, edge.y);
-    if (showLabels) {
-      const labelPt = latLonToScreen(-80, lon, config);
-      labels.push({ x: labelPt.x, y: labelPt.y, text: `${Math.round(lon)}°` });
-    }
-  }
-  ctx.save();
-  ctx.strokeStyle = 'rgba(203, 213, 225, 0.5)';
-  ctx.lineWidth = 1.6 * zoomScale;
-  ctx.stroke(path);
-  if (showLabels) {
-    ctx.fillStyle = 'rgba(226, 232, 240, 0.8)';
-    ctx.font = `${9 * zoomScale}px system-ui, sans-serif`;
-    ctx.textAlign = 'center';
-    labels.forEach((l) => ctx.fillText(l.text, l.x, l.y));
-  }
   ctx.restore();
 }
 
@@ -305,7 +360,7 @@ function drawLunarMansions(
     ctx.font = `bold ${10 * zoomScale}px system-ui, sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(mansion.nameAr, p.x, p.y);
+    fillTextUpright(ctx, mansion.nameAr, p.x, p.y);
   });
   ctx.restore();
 }
@@ -343,7 +398,7 @@ function drawSelectedMansions(
     ctx.font = `bold ${12 * zoomScale}px system-ui, sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(mansion.nameAr, p.x, p.y - 12 * zoomScale);
+    fillTextUpright(ctx, mansion.nameAr, p.x, p.y, 0, -12 * zoomScale);
   });
   ctx.restore();
 }
@@ -411,7 +466,7 @@ function drawStars(
   if (labelTargets.length) {
     ctx.font = `${10 * zoomScale}px system-ui, sans-serif`;
     ctx.fillStyle = 'rgba(226, 232, 240, 0.85)';
-    labelTargets.forEach((t) => ctx.fillText(t.name, t.x + 6, t.y - 4));
+    labelTargets.forEach((t) => fillTextUpright(ctx, t.name, t.x, t.y, 6, -4));
   }
   ctx.restore();
 }
@@ -459,17 +514,23 @@ function drawOneGroup(ctx: CanvasRenderingContext2D, groupId: number, gmstDeg: n
   const lines = getGroupLines(groupId);
   if (lines.length === 0) return;
 
-  const starById = new Map(getLoadedStars().map((s) => [s.id, s]));
+  const starById = getStarByIdMap(); // خريطة مخزّنة مرة واحدة، لا إعادة بناء كل إطار
 
+  // خطوط رفيعة بيضاء شبه شفافة، مقصوصة عند طرفيها بفراغ صغير عن النجمة كي لا تغطيها،
+  // وبلا نقاط ولا توهّج فوق النجوم نفسها
   ctx.save();
-  ctx.strokeStyle = ACCENT_LINE;
-  ctx.fillStyle = ACCENT_LINE_BRIGHT;
-  ctx.lineWidth = 2 * zoomScale;
-  ctx.shadowColor = ACCENT_LINE;
-  ctx.shadowBlur = 6 * zoomScale;
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.55)';
+  ctx.lineWidth = Math.min(1.3, 0.8 + 0.2 * zoomScale);
+  ctx.lineCap = 'butt';
+  const GAP_PX = 4 + 1.5 * zoomScale;
+  const seen = new Set<string>();
 
-  const drawnPoints = new Set<number>();
   lines.forEach(({ hipFrom, hipTo }) => {
+    if (hipFrom === hipTo) return;
+    const key = hipFrom < hipTo ? `${hipFrom}-${hipTo}` : `${hipTo}-${hipFrom}`;
+    if (seen.has(key)) return; // خط مكرر (أو معكوس) يُرسم مرة واحدة فقط
+    seen.add(key);
+
     const starFrom = starById.get(hipFrom);
     const starTo = starById.get(hipTo);
     if (!starFrom || !starTo) return; // عضو غير موجود في الكتالوج المحلي — تجاهل هذا الخط بأمان
@@ -478,21 +539,17 @@ function drawOneGroup(ctx: CanvasRenderingContext2D, groupId: number, gmstDeg: n
     const pTo = raDecToScreen(starTo.ra, starTo.dec, gmstDeg, config);
     if (!pFrom.visible && !pTo.visible) return;
 
-    ctx.beginPath();
-    ctx.moveTo(pFrom.x, pFrom.y);
-    ctx.lineTo(pTo.x, pTo.y);
-    ctx.stroke();
+    const dx = pTo.x - pFrom.x;
+    const dy = pTo.y - pFrom.y;
+    const len = Math.hypot(dx, dy);
+    if (len <= GAP_PX * 2 + 1) return; // أقصر من أن يتسع لفراغي الطرفين
+    const ux = dx / len;
+    const uy = dy / len;
 
-    [{ hip: hipFrom, p: pFrom }, { hip: hipTo, p: pTo }].forEach(({ hip, p }) => {
-      if (drawnPoints.has(hip)) return;
-      drawnPoints.add(hip);
-      ctx.save();
-      ctx.shadowBlur = 0;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, 1.4 * zoomScale, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-    });
+    ctx.beginPath();
+    ctx.moveTo(pFrom.x + ux * GAP_PX, pFrom.y + uy * GAP_PX);
+    ctx.lineTo(pTo.x - ux * GAP_PX, pTo.y - uy * GAP_PX);
+    ctx.stroke();
   });
   ctx.restore();
 
@@ -506,10 +563,38 @@ function drawOneGroup(ctx: CanvasRenderingContext2D, groupId: number, gmstDeg: n
       ctx.font = `bold ${12 * zoomScale}px system-ui, sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(group.nameAr, p.x, p.y);
+      fillTextUpright(ctx, group.nameAr, p.x, p.y);
       ctx.restore();
     }
   }
+}
+
+/**
+ * علامة تصويب على النجمة المحدَّدة (على طراز ستيلاريوم): أربعة أضلاع قصيرة متعامدة تحيط بها
+ * وتترك فراغاً في الوسط، بلون التمييز، مع نبض خفيف يلفت النظر.
+ */
+function drawStarReticle(ctx: CanvasRenderingContext2D, starId: number, gmstDeg: number, config: PolarMapConfig, zoomScale: number) {
+  const star = getStarByIdMap().get(starId);
+  if (!star) return;
+  const p = raDecToScreen(star.ra, star.dec, gmstDeg, config);
+  if (!p.visible) return;
+
+  // نبض بطيء (دورة ~4 ثوانٍ) على الفراغ والشفافية معاً
+  const t = (Math.sin(Date.now() / 640) + 1) / 2; // 0..1
+  const gap = 6 + 1.2 * zoomScale + 2 * t;
+  const len = 5 + 0.8 * zoomScale;
+  ctx.save();
+  ctx.strokeStyle = '#ffffff';
+  ctx.globalAlpha = 0.65 + 0.35 * (1 - t);
+  ctx.lineWidth = 1.2;
+  ctx.lineCap = 'butt';
+  ctx.beginPath();
+  ctx.moveTo(p.x - gap - len, p.y); ctx.lineTo(p.x - gap, p.y);
+  ctx.moveTo(p.x + gap, p.y);       ctx.lineTo(p.x + gap + len, p.y);
+  ctx.moveTo(p.x, p.y - gap - len); ctx.lineTo(p.x, p.y - gap);
+  ctx.moveTo(p.x, p.y + gap);       ctx.lineTo(p.x, p.y + gap + len);
+  ctx.stroke();
+  ctx.restore();
 }
 
 function drawSelectedGroups(ctx: CanvasRenderingContext2D, groupIds: number[], gmstDeg: number, config: PolarMapConfig, zoomScale: number) {
@@ -736,7 +821,7 @@ function drawJupiterMoons(
       ctx.font = `${8 * zoomScale}px system-ui, sans-serif`;
       ctx.fillStyle = 'rgba(220,214,198,0.85)';
       ctx.textAlign = 'center';
-      ctx.fillText(m.nameAr, p.x, p.y - 6 * zoomScale);
+      fillTextUpright(ctx, m.nameAr, p.x, p.y, 0, -6 * zoomScale);
     }
   });
   ctx.restore();
@@ -774,7 +859,7 @@ function drawPlanets(
       ctx.font = `${10 * zoomScale}px system-ui, sans-serif`;
       ctx.fillStyle = color;
       const labelOffsetX = name === 'Saturn' ? r * 2.6 : 7;
-      ctx.fillText(PLANET_LABELS_AR[name as keyof typeof PLANET_LABELS_AR] ?? name, p.x + labelOffsetX, p.y - 4);
+      fillTextUpright(ctx, PLANET_LABELS_AR[name as keyof typeof PLANET_LABELS_AR] ?? name, p.x, p.y, labelOffsetX, -4);
     }
 
     if (name === 'Jupiter') {
@@ -880,7 +965,7 @@ function drawObserverMarker(ctx: CanvasRenderingContext2D, observer: ObserverLoc
   if (showLabels) {
     ctx.font = `${10 * zoomScale}px system-ui, sans-serif`;
     ctx.fillStyle = '#d99b90';
-    ctx.fillText('موقعي', p.x + 7, p.y + 3);
+    fillTextUpright(ctx, 'موقعي', p.x, p.y, 7, 3);
   }
   ctx.restore();
 }
