@@ -60,6 +60,7 @@ const LAYER_CAPTIONS: Record<keyof LayerToggles, string> = {
 const MAIN_CAPTIONS = {
   time: 'الوقت',
   observer: 'الموقع',
+  dome: 'القبة',
   ground: 'الأرض',
   sky: 'السماء',
   labels: 'الأسماء',
@@ -256,6 +257,14 @@ export function ControlsPanel() {
                   </div>
                 </div>
               )}
+            </div>
+
+            {/* قبة الراصد: تبديل مباشر بنقرة واحدة (مثل زر الأسماء) */}
+            <div className="icon-item">
+              <button className="icon-trigger" data-active={layers.observerDome} onClick={() => toggleLayer('observerDome')} title="قبة الراصد (السماء فوق موقعي)">
+                <Telescope size={19} />
+                <span className="icon-caption">{MAIN_CAPTIONS.dome}</span>
+              </button>
             </div>
           </div>
 

@@ -55,7 +55,11 @@ export interface VectorLayers {
 // ───────────────────────────── فك الترميز ─────────────────────────────
 class Reader {
   pos = 0;
-  constructor(readonly b: Uint8Array) {}
+  readonly b: Uint8Array;
+  // بلا "خاصية معاملات" (readonly b في المُنشئ) لأن erasableSyntaxOnly في قالب Vite يمنعها
+  constructor(bytes: Uint8Array) {
+    this.b = bytes;
+  }
   u8(): number { return this.b[this.pos++]; }
   varint(): number {
     let r = 0, m = 1, byte: number;
