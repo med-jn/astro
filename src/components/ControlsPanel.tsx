@@ -1,21 +1,40 @@
-import { useState, type CSSProperties, type ElementType } from 'react';
+import { useEffect, useState, type CSSProperties, type ElementType, type ReactNode } from 'react';
 import {
   Play, Pause, Clock, MapPinned, LocateFixed, Globe2, Contrast, Orbit, Route, Radar,
   CircleDot, Star, Disc, Tag, Compass, Sparkles, X, Plus, Minus, RotateCcw, Moon,
-  Grid3x3, Clock3, Telescope,
+  Grid3x3, Clock3, Telescope, Menu, ChevronRight, Languages,
 } from 'lucide-react';
 import { SPEED_LABELS_AR, useSimulationStore, type LayerToggles } from '../state/store';
 import { ZODIAC_ORDER, type ZodiacKey } from '../core/zodiac';
 import { getZodiacNameAr } from '../core/zodiacNamesAr';
 import { getAllLunarMansions } from '../core/mansions';
+import { findPhase } from '../core/lunar';
+import { fmtClock, fmtDateLong, monthName, toInputValue, useI18n, type TKey } from '../i18n';
+import { CITIES, mansionName, zodiacName } from '../i18n/names';
 import { StarSearchBar } from './StarSearchBar';
+import { EclipsePanel } from './EclipsePanel';
 
-const GREGORIAN_MONTHS_AR = [
-  'يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
-  'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر',
-];
+/* ------------------------------------------------------------------ */
+/*  ثوابت                                                               */
+/* ------------------------------------------------------------------ */
+const LAYER_ICONS: Record<keyof LayerToggles, ElementType> = {
+  land: Globe2, terminator: Contrast, tropics: Orbit, meridians: Route,
+  equatorialGrid: Radar, mansions: Sparkles, ecliptic: CircleDot,
+  stars: Star, planets: Disc, labels: Tag, observerMarker: MapPinned,
+  gridFull: Grid3x3, timeZones: Clock3, observerDome: Telescope,
+};
 
-function addToDateField(date: Date, field: 'year' | 'month' | 'day' | 'hour' | 'minute', delta: number): Date {
+const SURFACE_KEYS: (keyof LayerToggles)[] = ['land', 'terminator'];
+const LINE_KEYS: (keyof LayerToggles)[] = ['tropics', 'meridians', 'gridFull', 'equatorialGrid', 'ecliptic'];
+const GROUND_KEYS = [...SURFACE_KEYS, ...LINE_KEYS, 'timeZones'] as (keyof LayerToggles)[];
+const SKY_KEYS: (keyof LayerToggles)[] = ['stars', 'planets'];
+
+const JUMP_PHASES = [0, 90, 180, 270] as const; // محاق، تربيع أول، بدر، تربيع أخير
+
+type PopoverKey = 'time' | 'observer' | 'ground' | 'sky' | 'zodiac' | 'mansions' | null;
+type DateField = 'year' | 'month' | 'day' | 'hour' | 'minute';
+
+function addToDateField(date: Date, field: DateField, delta: number): Date {
   const d = new Date(date);
   if (field === 'year') d.setFullYear(d.getFullYear() + delta);
   else if (field === 'month') d.setMonth(d.getMonth() + delta);
@@ -25,80 +44,124 @@ function addToDateField(date: Date, field: 'year' | 'month' | 'day' | 'hour' | '
   return d;
 }
 
-function formatHijri(date: Date): string {
-  try {
-    return new Intl.DateTimeFormat('ar-SA-u-ca-islamic-umalqura', {
-      year: 'numeric', month: 'long', day: 'numeric',
-    }).format(date);
-  } catch {
-    return '—';
-  }
+/* ------------------------------------------------------------------ */
+/*  مكوّنات صغيرة مشتركة                                                */
+/* ------------------------------------------------------------------ */
+function Flyout({ icon: Icon, title, onClose, children }: {
+  icon: ElementType; title: string; onClose: () => void; children: ReactNode;
+}) {
+  const { t } = useI18n();
+  return (
+    <div className="popover-panel" role="dialog" aria-label={title}>
+      <div className="popover-header">
+        <Icon size={16} />
+        <span className="popover-title-text">{title}</span>
+        <button className="popover-close" onClick={onClose} aria-label={t('close')}><X size={16} /></button>
+      </div>
+      <div className="popover-body">{children}</div>
+    </div>
+  );
 }
 
-const LAYER_ICONS: Record<keyof LayerToggles, ElementType> = {
-  land: Globe2, terminator: Contrast, tropics: Orbit, meridians: Route,
-  equatorialGrid: Radar, mansions: Sparkles, ecliptic: CircleDot,
-  stars: Star, planets: Disc, labels: Tag, observerMarker: MapPinned,
-  gridFull: Grid3x3, timeZones: Clock3, observerDome: Telescope,
-};
+function Section({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div className="section">
+      <div className="section-title">{title}</div>
+      <div className="section-body">{children}</div>
+    </div>
+  );
+}
 
-const LAYER_TITLES: Record<keyof LayerToggles, string> = {
-  land: 'الأرض', terminator: 'ظل الليل والنهار', tropics: 'المدارات الثلاثة', meridians: 'الشبكة الجغرافية (كل 10°)',
-  equatorialGrid: 'الشبكة الاستوائية', mansions: 'منازل القمر', ecliptic: 'خط البروج',
-  stars: 'النجوم', planets: 'الكواكب', labels: 'الأسماء', observerMarker: 'موقعي',
-  gridFull: 'الشبكة الكاملة (كل درجة)', timeZones: 'خطوط التوقيت العالمية', observerDome: 'قبة الراصد',
-};
+function NavRow({ icon: Icon, title, hint, active, badge, switchState, onClick }: {
+  icon: ElementType; title: string; hint?: string; active?: boolean; badge?: boolean;
+  switchState?: boolean; onClick: () => void;
+}) {
+  return (
+    <button
+      className="icon-trigger"
+      data-active={!!active}
+      aria-pressed={switchState}
+      aria-expanded={switchState === undefined ? !!active : undefined}
+      onClick={onClick}
+      title={title}
+    >
+      <Icon size={18} />
+      <span className="nav-text">
+        <span className="icon-caption">{title}</span>
+        {hint && <span className="nav-hint">{hint}</span>}
+      </span>
+      {badge && <span className="badge-dot" />}
+      {switchState === undefined ? <ChevronRight size={14} className="nav-chev" /> : <span className="switch" data-on={switchState} aria-hidden />}
+    </button>
+  );
+}
 
-const LAYER_CAPTIONS: Record<keyof LayerToggles, string> = {
-  land: 'أرض', terminator: 'ظل', tropics: 'مدارات', meridians: '10°',
-  equatorialGrid: 'شبكة', mansions: 'منازل', ecliptic: 'بروج',
-  stars: 'نجوم', planets: 'كواكب', labels: 'أسماء', observerMarker: 'موقعي',
-  gridFull: '1°', timeZones: 'توقيت', observerDome: 'قبة',
-};
-
-/** تسميات نصية تظهر تحت الأيقونات الرئيسية على سطح المكتب فقط (انظر .icon-caption في index.css) */
-const MAIN_CAPTIONS = {
-  time: 'الوقت',
-  observer: 'الموقع',
-  dome: 'القبة',
-  ground: 'الأرض',
-  sky: 'السماء',
-  labels: 'الأسماء',
-  zodiac: 'الأبراج',
-  mansions: 'المنازل',
-} as const;
-
-const GROUND_KEYS: (keyof LayerToggles)[] = ['land', 'terminator', 'tropics', 'meridians', 'gridFull', 'timeZones', 'equatorialGrid', 'ecliptic'];
-const SKY_KEYS: (keyof LayerToggles)[] = ['stars', 'planets'];
-
-type PopoverKey = 'time' | 'observer' | 'ground' | 'sky' | 'zodiac' | 'mansions' | null;
+function SwitchRow({ icon: Icon, label, checked, onChange }: {
+  icon: ElementType; label: string; checked: boolean; onChange: () => void;
+}) {
+  return (
+    <button className="switch-row" role="switch" aria-checked={checked} onClick={onChange}>
+      <Icon size={16} />
+      <span className="switch-label">{label}</span>
+      <span className="switch" data-on={checked} aria-hidden />
+    </button>
+  );
+}
 
 function StepperRow({ label, value, onDec, onInc }: { label: string; value: string; onDec: () => void; onInc: () => void }) {
+  const { t } = useI18n();
   return (
     <div className="stepper-row">
       <span className="stepper-label">{label}</span>
       <div className="stepper-controls">
-        <button className="stepper-btn" onClick={onDec} aria-label={`إنقاص ${label}`}><Minus size={14} /></button>
-        <span className="stepper-value">{value}</span>
-        <button className="stepper-btn" onClick={onInc} aria-label={`زيادة ${label}`}><Plus size={14} /></button>
+        <button className="stepper-btn" onClick={onDec} aria-label={t('dec', { label })}><Minus size={14} /></button>
+        <span className="stepper-value num">{value}</span>
+        <button className="stepper-btn" onClick={onInc} aria-label={t('inc', { label })}><Plus size={14} /></button>
       </div>
     </div>
   );
 }
 
-function LayerTile({ layerKey, active, onToggle }: { layerKey: keyof LayerToggles; active: boolean; onToggle: () => void }) {
-  const Icon = LAYER_ICONS[layerKey];
+function CoordField({ label, value, min, max, pos, neg, onCommit }: {
+  label: string; value: number; min: number; max: number; pos: string; neg: string; onCommit: (n: number) => void;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const rounded = String(Number(value.toFixed(4)));
+  const parsed = draft === null ? value : Number(draft.replace(',', '.'));
+  const invalid = draft !== null && (draft.trim() === '' || !Number.isFinite(parsed) || parsed < min || parsed > max);
   return (
-    <button className="layer-tile" aria-pressed={active} title={LAYER_TITLES[layerKey]} onClick={onToggle}>
-      <Icon size={17} />
-      <span>{LAYER_CAPTIONS[layerKey]}</span>
-    </button>
+    <label className="field">
+      <span className="field-label">{label}</span>
+      <input
+        type="text"
+        inputMode="decimal"
+        className="coord-input"
+        value={draft ?? rounded}
+        data-invalid={invalid}
+        aria-invalid={invalid}
+        onFocus={() => setDraft(rounded)}
+        onBlur={() => setDraft(null)}
+        onChange={(e) => {
+          setDraft(e.target.value);
+          const n = Number(e.target.value.replace(',', '.'));
+          if (e.target.value.trim() !== '' && Number.isFinite(n) && n >= min && n <= max) onCommit(n);
+        }}
+      />
+      <span className="field-hint num">{Math.abs(value).toFixed(4)}° {value >= 0 ? pos : neg}</span>
+    </label>
   );
 }
 
+/* ------------------------------------------------------------------ */
+/*  اللوحة                                                              */
+/* ------------------------------------------------------------------ */
 export function ControlsPanel() {
+  const { t, lang, locale, setLang, speedLabel } = useI18n();
   const [openPopover, setOpenPopover] = useState<PopoverKey>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const [calendarMode, setCalendarMode] = useState<'gregorian' | 'hijri'>('gregorian');
+  const [geoStatus, setGeoStatus] = useState<'idle' | 'busy' | 'failed'>('idle');
+  const [mansionFilter, setMansionFilter] = useState('');
 
   const {
     date, isPlaying, speedIndex, observer, layers, timeZoneKind,
@@ -108,297 +171,322 @@ export function ControlsPanel() {
     setTimeZoneKind,
   } = useSimulationStore();
 
-  const toggle = (key: PopoverKey) => setOpenPopover((prev) => (prev === key ? null : key));
+  const closeAll = () => { setOpenPopover(null); };
 
-  const hasGroundExtra = layers.tropics || layers.meridians || layers.gridFull || layers.timeZones || layers.equatorialGrid || layers.ecliptic;
-  const hasSkyExtra = layers.stars || layers.planets;
-  const hasZodiacExtra = selectedZodiacs.length > 0;
-  const hasMansionExtra = selectedMansionIndices.length > 0 || layers.mansions;
+  // Escape: يغلق النافذة المنبثقة أولاً، ثم الدرج
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (openPopover) setOpenPopover(null);
+      else setDrawerOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [openPopover]);
+
+  // على الموبايل: فتح نافذة يُغلق الدرج، وتبقى النافذة كصفحة سفلية مستقلة
+  const toggle = (key: PopoverKey) => {
+    setOpenPopover((prev) => (prev === key ? null : key));
+    setDrawerOpen(false);
+  };
+
+  const hijriFmt = (d: Date) => {
+    try {
+      return new Intl.DateTimeFormat(locale.hijri, { year: 'numeric', month: 'long', day: 'numeric' }).format(d);
+    } catch {
+      return '—';
+    }
+  };
 
   const mansions = getAllLunarMansions();
+  const q = mansionFilter.trim().toLowerCase();
+  const filteredMansions = mansions.filter(
+    (m) => !q || m.nameAr.includes(q) || mansionName(m, 'en').toLowerCase().includes(q),
+  );
+
+  const groundOn = GROUND_KEYS.filter((k) => layers[k]).length;
+  const skyOn = SKY_KEYS.filter((k) => layers[k]).length;
+  const latHint = `${Math.abs(observer.latitudeDeg).toFixed(2)}°${observer.latitudeDeg >= 0 ? t('dir_n') : t('dir_s')}`;
+  const lonHint = `${Math.abs(observer.longitudeDeg).toFixed(2)}°${observer.longitudeDeg >= 0 ? t('dir_e') : t('dir_w')}`;
+
+  const locate = () => {
+    if (!navigator.geolocation) return setGeoStatus('failed');
+    setGeoStatus('busy');
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setObserver({ latitudeDeg: pos.coords.latitude, longitudeDeg: pos.coords.longitude });
+        setGeoStatus('idle');
+      },
+      () => setGeoStatus('failed'),
+      { timeout: 10_000 },
+    );
+  };
+
+  const layerRow = (k: keyof LayerToggles) => (
+    <SwitchRow key={k} icon={LAYER_ICONS[k]} label={t(`layer_${k}` as TKey)} checked={layers[k]} onChange={() => toggleLayer(k)} />
+  );
 
   return (
     <>
-      {openPopover && <button className="popover-backdrop" onClick={() => setOpenPopover(null)} aria-label="إغلاق" />}
+      <button className="menu-fab" data-hidden={drawerOpen} onClick={() => setDrawerOpen(true)} aria-label={t('menu_open')}>
+        <Menu size={22} />
+      </button>
+      {drawerOpen && <button className="drawer-backdrop" onClick={() => setDrawerOpen(false)} aria-label={t('menu_close')} />}
+      {openPopover && <button className="popover-backdrop" onClick={closeAll} aria-label={t('close')} />}
 
-      <nav className="controls-panel" aria-label="لوحة تحكم المحاكي">
+      <nav className="controls-panel" data-open={drawerOpen} aria-label={t('nav_aria')}>
         <div className="sidebar-brand">
           <Moon size={20} />
-          <span>نجم</span>
+          <span className="brand-name">{t('app_name')}</span>
+          <button className="lang-btn" onClick={() => setLang(lang === 'ar' ? 'en' : 'ar')} aria-label="Language / اللغة">
+            <Languages size={15} />
+            <span>{t('lang_switch')}</span>
+          </button>
+          <button className="drawer-close" onClick={() => setDrawerOpen(false)} aria-label={t('menu_close')}>
+            <X size={18} />
+          </button>
         </div>
-        <div className="icon-bar">
 
-          {/* التشغيل: فعل مباشر متكرر — هوية دائرية منفردة تميّزه عن أزرار تبديل العرض */}
-          <div className="icon-item">
+        <div className="icon-bar">
+          {/* ===== الساعة وأزرار التشغيل ===== */}
+          <div className="transport">
             <button
-              className="icon-trigger icon-trigger-hero"
+              className="play-btn"
               data-active={isPlaying}
               onClick={togglePlay}
-              title={isPlaying ? 'إيقاف' : 'تشغيل'}
+              aria-label={t(isPlaying ? 'pause' : 'play')}
+              title={t(isPlaying ? 'pause' : 'play')}
             >
-              {isPlaying ? <Pause size={19} /> : <Play size={19} />}
+              {isPlaying ? <Pause size={20} /> : <Play size={20} />}
             </button>
+            <button className="clock" data-active={openPopover === 'time'} onClick={() => toggle('time')} aria-label={t('nav_time')}>
+              <span className="clock-time num">{fmtClock(date)}</span>
+              <span className="clock-date">
+                {fmtDateLong(date, locale.date)}
+                <span className="clock-speed">{speedLabel(SPEED_LABELS_AR, speedIndex)}</span>
+              </span>
+            </button>
+
+            {openPopover === 'time' && (
+              <Flyout icon={Clock} title={t('nav_time')} onClose={closeAll}>
+                <Section title={t('time_direct')}>
+                  <input
+                    type="datetime-local"
+                    step={1}
+                    className="coord-input dt-input"
+                    value={toInputValue(date)}
+                    onFocus={() => { if (isPlaying) togglePlay(); }}
+                    onChange={(e) => {
+                      const d = new Date(e.target.value);
+                      if (!Number.isNaN(d.getTime())) setDate(d);
+                    }}
+                  />
+                </Section>
+
+                <div className="calendar-toggle" role="group">
+                  <button aria-pressed={calendarMode === 'gregorian'} onClick={() => setCalendarMode('gregorian')}>{t('cal_gregorian')}</button>
+                  <button aria-pressed={calendarMode === 'hijri'} onClick={() => setCalendarMode('hijri')}>{t('cal_hijri')}</button>
+                </div>
+
+                {calendarMode === 'gregorian' ? (
+                  <>
+                    <StepperRow label={t('f_year')} value={String(date.getFullYear())}
+                      onDec={() => setDate(addToDateField(date, 'year', -1))} onInc={() => setDate(addToDateField(date, 'year', 1))} />
+                    <StepperRow label={t('f_month')} value={monthName(date, locale.date)}
+                      onDec={() => setDate(addToDateField(date, 'month', -1))} onInc={() => setDate(addToDateField(date, 'month', 1))} />
+                    <StepperRow label={t('f_day')} value={String(date.getDate())}
+                      onDec={() => setDate(addToDateField(date, 'day', -1))} onInc={() => setDate(addToDateField(date, 'day', 1))} />
+                  </>
+                ) : (
+                  <>
+                    <div className="hijri-display">{hijriFmt(date)}</div>
+                    <StepperRow label={t('f_day')} value={String(date.getDate())}
+                      onDec={() => setDate(addToDateField(date, 'day', -1))} onInc={() => setDate(addToDateField(date, 'day', 1))} />
+                  </>
+                )}
+                <StepperRow label={t('f_hour')} value={String(date.getHours()).padStart(2, '0')}
+                  onDec={() => setDate(addToDateField(date, 'hour', -1))} onInc={() => setDate(addToDateField(date, 'hour', 1))} />
+                <StepperRow label={t('f_minute')} value={String(date.getMinutes()).padStart(2, '0')}
+                  onDec={() => setDate(addToDateField(date, 'minute', -1))} onInc={() => setDate(addToDateField(date, 'minute', 1))} />
+
+                <button className="btn-wide" onClick={resetToNow}><RotateCcw size={16} /> {t('now')}</button>
+
+                <Section title={t('jump_title')}>
+                  <div className="chip-row">
+                    {JUMP_PHASES.map((deg) => (
+                      <button key={deg} className="chip-btn" onClick={() => setDate(findPhase(date, deg))}>
+                        {t(`phase_${deg / 45}` as TKey)}
+                      </button>
+                    ))}
+                  </div>
+                </Section>
+
+                <div className="speed-row">
+                  <span className="speed-label">{t('speed')}</span>
+                  <input
+                    type="range" min={0} max={6} step={1} value={speedIndex}
+                    onChange={(e) => setSpeedIndex(Number(e.target.value))}
+                    className="slider"
+                    style={{ '--p': `${(speedIndex / 6) * 100}%` } as CSSProperties}
+                  />
+                  <span className="speed-chip">{speedLabel(SPEED_LABELS_AR, speedIndex)}</span>
+                </div>
+              </Flyout>
+            )}
           </div>
 
-          {/* البحث عن نجم — مجموعة مستقلة، أول أداة تفاعلية بعد التشغيل */}
+          {/* ===== البحث والأحداث (مكوّنان قائمان — يُعاد تنسيقهما عبر CSS) ===== */}
           <div className="icon-group">
-            <span className="sidebar-section-label">البحث</span>
+            <span className="sidebar-section-label">{t('grp_search')}</span>
             <StarSearchBar />
+            <EclipsePanel />
           </div>
 
-          {/* مجموعة: السياق الزمني والمكاني */}
+          {/* ===== الوقت والموقع ===== */}
           <div className="icon-group">
-            <span className="sidebar-section-label">الوقت والموقع</span>
-            <div className="icon-item">
-              <button className="icon-trigger" data-active={openPopover === 'time'} onClick={() => toggle('time')} title="الوقت والتاريخ">
-                <Clock size={19} />
-                <span className="icon-caption">{MAIN_CAPTIONS.time}</span>
-              </button>
-              {openPopover === 'time' && (
-                <div className="popover-panel" role="dialog" aria-label="الوقت والتاريخ">
-                  <div className="popover-header">
-                    <Clock size={16} />
-                    <span className="popover-title-text">الوقت والتاريخ</span>
-                    <button className="popover-close" onClick={() => setOpenPopover(null)}><X size={16} /></button>
-                  </div>
-                  <div className="popover-body">
-                    <div className="calendar-toggle">
-                      <button aria-pressed={calendarMode === 'gregorian'} onClick={() => setCalendarMode('gregorian')}>ميلادي</button>
-                      <button aria-pressed={calendarMode === 'hijri'} onClick={() => setCalendarMode('hijri')}>هجري</button>
-                    </div>
-
-                    {calendarMode === 'gregorian' ? (
-                      <>
-                        <StepperRow label="السنة" value={String(date.getFullYear())}
-                          onDec={() => setDate(addToDateField(date, 'year', -1))}
-                          onInc={() => setDate(addToDateField(date, 'year', 1))} />
-                        <StepperRow label="الشهر" value={GREGORIAN_MONTHS_AR[date.getMonth()]}
-                          onDec={() => setDate(addToDateField(date, 'month', -1))}
-                          onInc={() => setDate(addToDateField(date, 'month', 1))} />
-                        <StepperRow label="اليوم" value={String(date.getDate())}
-                          onDec={() => setDate(addToDateField(date, 'day', -1))}
-                          onInc={() => setDate(addToDateField(date, 'day', 1))} />
-                      </>
-                    ) : (
-                      <div className="hijri-display">{formatHijri(date)}</div>
-                    )}
-
-                    <StepperRow label="الساعة" value={String(date.getHours()).padStart(2, '0')}
-                      onDec={() => setDate(addToDateField(date, 'hour', -1))}
-                      onInc={() => setDate(addToDateField(date, 'hour', 1))} />
-                    <StepperRow label="الدقيقة" value={String(date.getMinutes()).padStart(2, '0')}
-                      onDec={() => setDate(addToDateField(date, 'minute', -1))}
-                      onInc={() => setDate(addToDateField(date, 'minute', 1))} />
-
-                    <button className="btn-wide" onClick={resetToNow}>
-                      <RotateCcw size={16} /> الوقت الحالي
-                    </button>
-
-                    <div className="speed-row">
-                      <span className="speed-label">السرعة</span>
-                      <input
-                        type="range" min={0} max={6} step={1} value={speedIndex}
-                        onChange={(e) => setSpeedIndex(Number(e.target.value))}
-                        className="slider"
-                        style={{ '--p': `${(speedIndex / 6) * 100}%` } as CSSProperties}
-                      />
-                      <span className="speed-chip">{SPEED_LABELS_AR[speedIndex]}</span>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
+            <span className="sidebar-section-label">{t('grp_time')}</span>
 
             <div className="icon-item">
-              <button className="icon-trigger" data-active={openPopover === 'observer'} onClick={() => toggle('observer')} title="الموقع والإحداثيات">
-                <MapPinned size={19} />
-                <span className="icon-caption">{MAIN_CAPTIONS.observer}</span>
-                {layers.observerDome && <span className="badge-dot" />}
-              </button>
+              <NavRow icon={MapPinned} title={t('nav_observer')} hint={`${latHint} · ${lonHint}`}
+                active={openPopover === 'observer'} onClick={() => toggle('observer')} />
               {openPopover === 'observer' && (
-                <div className="popover-panel" role="dialog" aria-label="الموقع والإحداثيات">
-                  <div className="popover-header">
-                    <MapPinned size={16} />
-                    <span className="popover-title-text">الموقع والإحداثيات</span>
-                    <button className="popover-close" onClick={() => setOpenPopover(null)}><X size={16} /></button>
+                <Flyout icon={MapPinned} title={t('nav_observer')} onClose={closeAll}>
+                  <div className="coord-grid">
+                    <CoordField label={t('lat')} value={observer.latitudeDeg} min={-90} max={90}
+                      pos={t('dir_n')} neg={t('dir_s')} onCommit={(n) => setObserver({ latitudeDeg: n })} />
+                    <CoordField label={t('lon')} value={observer.longitudeDeg} min={-180} max={180}
+                      pos={t('dir_e')} neg={t('dir_w')} onCommit={(n) => setObserver({ longitudeDeg: n })} />
                   </div>
-                  <div className="popover-body">
-                    <div className="coord-grid">
-                      <div className="field">
-                        <span className="field-label">خط العرض</span>
-                        <input type="number" step={0.01} value={observer.latitudeDeg}
-                          onChange={(e) => setObserver({ latitudeDeg: Number(e.target.value) })} className="coord-input" />
-                      </div>
-                      <div className="field">
-                        <span className="field-label">خط الطول</span>
-                        <input type="number" step={0.01} value={observer.longitudeDeg}
-                          onChange={(e) => setObserver({ longitudeDeg: Number(e.target.value) })} className="coord-input" />
-                      </div>
+
+                  <button className="btn-wide" onClick={locate} disabled={geoStatus === 'busy'}>
+                    <LocateFixed size={16} /> {geoStatus === 'busy' ? t('locating') : t('use_my_location')}
+                  </button>
+                  {geoStatus === 'failed' && <p className="form-error" role="alert">{t('geo_failed')}</p>}
+
+                  <Section title={t('presets')}>
+                    <div className="chip-row">
+                      {CITIES.map((c) => (
+                        <button key={c.id} className="chip-btn" onClick={() => setObserver({ latitudeDeg: c.lat, longitudeDeg: c.lon })}>
+                          {t(c.id as TKey)}
+                        </button>
+                      ))}
                     </div>
-                    <button
-                      className="btn-wide"
-                      onClick={() => {
-                        if (!navigator.geolocation) return;
-                        navigator.geolocation.getCurrentPosition((pos) => {
-                          setObserver({ latitudeDeg: pos.coords.latitude, longitudeDeg: pos.coords.longitude });
-                        });
-                      }}
-                    >
-                      <LocateFixed size={16} /> استخدام موقعي الحالي
-                    </button>
-                    <button className="toggle-row" aria-pressed={layers.observerMarker} onClick={() => toggleLayer('observerMarker')}>
-                      <MapPinned size={16} />
-                      <span>إظهار علامة موقعي على الخريطة</span>
-                    </button>
-                    <button className="toggle-row" aria-pressed={layers.observerDome} onClick={() => toggleLayer('observerDome')}>
-                      <Telescope size={16} />
-                      <span>قبة الراصد (السماء فوق موقعي)</span>
-                    </button>
-                  </div>
-                </div>
+                  </Section>
+
+                  <SwitchRow icon={MapPinned} label={t('show_marker')} checked={layers.observerMarker} onChange={() => toggleLayer('observerMarker')} />
+                  <SwitchRow icon={Telescope} label={t('dome_toggle')} checked={layers.observerDome} onChange={() => toggleLayer('observerDome')} />
+                </Flyout>
               )}
             </div>
 
-            {/* قبة الراصد: تبديل مباشر بنقرة واحدة (مثل زر الأسماء) */}
             <div className="icon-item">
-              <button className="icon-trigger" data-active={layers.observerDome} onClick={() => toggleLayer('observerDome')} title="قبة الراصد (السماء فوق موقعي)">
-                <Telescope size={19} />
-                <span className="icon-caption">{MAIN_CAPTIONS.dome}</span>
-              </button>
+              <NavRow icon={Telescope} title={t('nav_dome')} hint={t(layers.observerDome ? 'hint_on' : 'hint_off')}
+                switchState={layers.observerDome} onClick={() => toggleLayer('observerDome')} />
             </div>
           </div>
 
-          {/* مجموعة: طبقات العرض */}
+          {/* ===== طبقات العرض ===== */}
           <div className="icon-group">
-            <span className="sidebar-section-label">طبقات العرض</span>
+            <span className="sidebar-section-label">{t('grp_layers')}</span>
+
             <div className="icon-item">
-              <button className="icon-trigger" data-active={openPopover === 'ground'} onClick={() => toggle('ground')} title="الأرض والشبكة">
-                <Globe2 size={19} />
-                <span className="icon-caption">{MAIN_CAPTIONS.ground}</span>
-                {hasGroundExtra && <span className="badge-dot" />}
-              </button>
+              <NavRow icon={Globe2} title={t('nav_ground')}
+                hint={groundOn ? t('hint_layers_on', { n: groundOn }) : t('hint_none')}
+                active={openPopover === 'ground'} badge={groundOn > 0} onClick={() => toggle('ground')} />
               {openPopover === 'ground' && (
-                <div className="popover-panel" role="dialog" aria-label="الأرض والشبكة">
-                  <div className="popover-header">
-                    <Globe2 size={16} />
-                    <span className="popover-title-text">الأرض والشبكة</span>
-                    <button className="popover-close" onClick={() => setOpenPopover(null)}><X size={16} /></button>
-                  </div>
-                  <div className="popover-body">
-                    <div className="layers-grid">
-                      {GROUND_KEYS.map((k) => (
-                        <LayerTile key={k} layerKey={k} active={layers[k]} onToggle={() => toggleLayer(k)} />
-                      ))}
-                    </div>
+                <Flyout icon={Globe2} title={t('nav_ground')} onClose={closeAll}>
+                  <Section title={t('sec_surface')}>{SURFACE_KEYS.map(layerRow)}</Section>
+                  <Section title={t('sec_lines')}>{LINE_KEYS.map(layerRow)}</Section>
+                  <Section title={t('sec_tz')}>
+                    {layerRow('timeZones')}
                     {layers.timeZones && (
-                      <div className="calendar-toggle" role="group" aria-label="نوع خطوط التوقيت">
-                        <button aria-pressed={timeZoneKind === 'nominal'} onClick={() => setTimeZoneKind('nominal')}>خطوط 15°</button>
-                        <button aria-pressed={timeZoneKind === 'legal'} onClick={() => setTimeZoneKind('legal')}>المناطق الفعلية</button>
+                      <div className="calendar-toggle" role="group" aria-label={t('tz_aria')}>
+                        <button aria-pressed={timeZoneKind === 'nominal'} onClick={() => setTimeZoneKind('nominal')}>{t('tz_nominal')}</button>
+                        <button aria-pressed={timeZoneKind === 'legal'} onClick={() => setTimeZoneKind('legal')}>{t('tz_legal')}</button>
                       </div>
                     )}
-                  </div>
-                </div>
+                  </Section>
+                </Flyout>
               )}
             </div>
 
             <div className="icon-item">
-              <button className="icon-trigger" data-active={openPopover === 'sky'} onClick={() => toggle('sky')} title="النجوم والكواكب">
-                <Star size={19} />
-                <span className="icon-caption">{MAIN_CAPTIONS.sky}</span>
-                {hasSkyExtra && <span className="badge-dot" />}
-              </button>
+              <NavRow icon={Star} title={t('nav_sky')}
+                hint={skyOn ? t('hint_layers_on', { n: skyOn }) : t('hint_none')}
+                active={openPopover === 'sky'} badge={skyOn > 0} onClick={() => toggle('sky')} />
               {openPopover === 'sky' && (
-                <div className="popover-panel" role="dialog" aria-label="النجوم والكواكب">
-                  <div className="popover-header">
-                    <Star size={16} />
-                    <span className="popover-title-text">النجوم والكواكب</span>
-                    <button className="popover-close" onClick={() => setOpenPopover(null)}><X size={16} /></button>
-                  </div>
-                  <div className="popover-body">
-                    <div className="layers-grid">
-                      {SKY_KEYS.map((k) => (
-                        <LayerTile key={k} layerKey={k} active={layers[k]} onToggle={() => toggleLayer(k)} />
-                      ))}
-                    </div>
-                  </div>
-                </div>
+                <Flyout icon={Star} title={t('nav_sky')} onClose={closeAll}>
+                  <Section title={t('sec_objects')}>{SKY_KEYS.map(layerRow)}</Section>
+                </Flyout>
               )}
             </div>
 
             <div className="icon-item">
-              <button className="icon-trigger" data-active={layers.labels} onClick={() => toggleLayer('labels')} title="إظهار الأسماء">
-                <Tag size={19} />
-                <span className="icon-caption">{MAIN_CAPTIONS.labels}</span>
-              </button>
+              <NavRow icon={Tag} title={t('nav_labels')} hint={t(layers.labels ? 'hint_on' : 'hint_off')}
+                switchState={layers.labels} onClick={() => toggleLayer('labels')} />
             </div>
           </div>
 
-          {/* مجموعة: الإبرازات */}
+          {/* ===== الإبرازات ===== */}
           <div className="icon-group">
-            <span className="sidebar-section-label">الإبرازات</span>
+            <span className="sidebar-section-label">{t('grp_highlight')}</span>
+
             <div className="icon-item">
-              <button className="icon-trigger" data-active={openPopover === 'zodiac'} onClick={() => toggle('zodiac')} title="الأبراج">
-                <Compass size={19} />
-                <span className="icon-caption">{MAIN_CAPTIONS.zodiac}</span>
-                {hasZodiacExtra && <span className="badge-dot" />}
-              </button>
+              <NavRow icon={Compass} title={t('nav_zodiac')}
+                hint={selectedZodiacs.length ? t('hint_selected', { n: selectedZodiacs.length }) : t('hint_none')}
+                active={openPopover === 'zodiac'} badge={selectedZodiacs.length > 0} onClick={() => toggle('zodiac')} />
               {openPopover === 'zodiac' && (
-                <div className="popover-panel" role="dialog" aria-label="الأبراج">
-                  <div className="popover-header">
-                    <Compass size={16} />
-                    <span className="popover-title-text">الأبراج</span>
-                    <button className="popover-close" onClick={() => setOpenPopover(null)}><X size={16} /></button>
-                  </div>
-                  <div className="popover-body">
+                <Flyout icon={Compass} title={t('nav_zodiac')} onClose={closeAll}>
+                  <div className="list-actions">
+                    <button className="clear-btn" onClick={() => ZODIAC_ORDER.forEach((z: ZodiacKey) => { if (!selectedZodiacs.includes(z)) toggleZodiacSelection(z); })}>
+                      {t('select_all')}
+                    </button>
                     {selectedZodiacs.length > 0 && (
-                      <button className="clear-btn" onClick={clearZodiacSelection}>مسح التحديد ({selectedZodiacs.length})</button>
+                      <button className="clear-btn" onClick={clearZodiacSelection}>{t('clear_sel', { n: selectedZodiacs.length })}</button>
                     )}
-                    <div className="select-list">
-                      {ZODIAC_ORDER.map((z: ZodiacKey, i: number) => (
-                        <button key={z} className="select-item" aria-pressed={selectedZodiacs.includes(z)} onClick={() => toggleZodiacSelection(z)}>
-                          {getZodiacNameAr(z, i)}
-                        </button>
-                      ))}
-                    </div>
                   </div>
-                </div>
+                  <div className="select-list">
+                    {ZODIAC_ORDER.map((z: ZodiacKey, i: number) => (
+                      <button key={z} className="select-item" aria-pressed={selectedZodiacs.includes(z)} onClick={() => toggleZodiacSelection(z)}>
+                        <span className="select-index num">{i + 1}</span>
+                        <span className="select-name">{zodiacName(String(z), getZodiacNameAr(z, i), lang)}</span>
+                      </button>
+                    ))}
+                  </div>
+                </Flyout>
               )}
             </div>
 
             <div className="icon-item">
-              <button className="icon-trigger" data-active={openPopover === 'mansions'} onClick={() => toggle('mansions')} title="منازل القمر">
-                <Sparkles size={19} />
-                <span className="icon-caption">{MAIN_CAPTIONS.mansions}</span>
-                {hasMansionExtra && <span className="badge-dot" />}
-              </button>
+              <NavRow icon={Sparkles} title={t('nav_mansions')}
+                hint={selectedMansionIndices.length ? t('hint_selected', { n: selectedMansionIndices.length }) : layers.mansions ? t('hint_on') : t('hint_none')}
+                active={openPopover === 'mansions'} badge={selectedMansionIndices.length > 0 || layers.mansions}
+                onClick={() => toggle('mansions')} />
               {openPopover === 'mansions' && (
-                <div className="popover-panel" role="dialog" aria-label="منازل القمر">
-                  <div className="popover-header">
-                    <Sparkles size={16} />
-                    <span className="popover-title-text">منازل القمر</span>
-                    <button className="popover-close" onClick={() => setOpenPopover(null)}><X size={16} /></button>
-                  </div>
-                  <div className="popover-body">
-                    <button className="toggle-row" aria-pressed={layers.mansions} onClick={() => toggleLayer('mansions')}>
-                      <Sparkles size={16} />
-                      <span>إظهار كل الأسماء على الخريطة</span>
-                    </button>
-                    {selectedMansionIndices.length > 0 && (
-                      <button className="clear-btn" onClick={clearMansionSelection}>مسح التحديد ({selectedMansionIndices.length})</button>
-                    )}
-                    <div className="select-list select-list-scroll">
-                      {mansions.map((m) => (
-                        <button key={m.index} className="select-item" aria-pressed={selectedMansionIndices.includes(m.index)} onClick={() => toggleMansionSelection(m.index)}>
-                          {m.nameAr}
-                        </button>
-                      ))}
+                <Flyout icon={Sparkles} title={t('nav_mansions')} onClose={closeAll}>
+                  <SwitchRow icon={Sparkles} label={t('mansions_show_all')} checked={layers.mansions} onChange={() => toggleLayer('mansions')} />
+                  <input
+                    className="search-input" type="search" value={mansionFilter}
+                    onChange={(e) => setMansionFilter(e.target.value)} placeholder={t('filter_ph')}
+                  />
+                  {selectedMansionIndices.length > 0 && (
+                    <div className="list-actions">
+                      <button className="clear-btn" onClick={clearMansionSelection}>{t('clear_sel', { n: selectedMansionIndices.length })}</button>
                     </div>
+                  )}
+                  <div className="select-list select-list-scroll">
+                    {filteredMansions.map((m) => (
+                      <button key={m.index} className="select-item" aria-pressed={selectedMansionIndices.includes(m.index)} onClick={() => toggleMansionSelection(m.index)}>
+                        <span className="select-index num">{m.index + 1}</span>
+                        <span className="select-name">{mansionName(m, lang)}</span>
+                      </button>
+                    ))}
+                    {filteredMansions.length === 0 && <div className="search-empty">{t('no_results')}</div>}
                   </div>
-                </div>
+                </Flyout>
               )}
             </div>
           </div>
-
         </div>
       </nav>
     </>

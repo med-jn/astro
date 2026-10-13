@@ -11,6 +11,19 @@ export function setSceneRotationRad(rad: number): void {
   sceneRotationRad = rad;
 }
 
+/** زاوية دوران المشهد الحالية (راديان): تلزم لمن يحسب مواضع النصوص في إطار الشاشة لا في إطار المشهد المدوَّر */
+export function getSceneRotationRad(): number {
+  return sceneRotationRad;
+}
+
+/**
+ * المسافة الأفقية بين مركز العنصر وبداية اسمه: نصف قطر العنصر + هامش ثابت + هامش ينمو مع حجم
+ * الخط (uiScale). بدونها يلتصق الاسم بالعنصر ويغطي ما حوله من نجوم.
+ */
+export function labelGap(elementRadiusPx: number, uiScale: number): number {
+  return elementRadiusPx + 9 + 3 * uiScale;
+}
+
 export function fillTextUpright(
   ctx: CanvasRenderingContext2D,
   text: string,

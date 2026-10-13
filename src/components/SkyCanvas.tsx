@@ -163,6 +163,7 @@ export function SkyCanvas({ onFrame }: Props) {
         selectedGroupIds: currentState.selectedGroupIds,
         highlightedStarId: currentState.highlightedStarId,
         timeZoneKind: currentState.timeZoneKind,
+        eclipseFocus: currentState.eclipseFocus,
         sceneRotationDeg: currentState.sceneRotationDeg,
         panX: currentState.panX,
         panY: currentState.panY,

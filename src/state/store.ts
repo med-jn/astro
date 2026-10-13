@@ -4,6 +4,7 @@ import { DEFAULT_OBSERVER } from '../core/observer';
 import type { ObserverLocation } from '../types/astro';
 import type { ZodiacKey } from '../core/zodiac';
 import { getGroupIdsOfStar } from '../core/starGroups';
+import type { EclipseFocus } from '../render/eclipseOverlay';
 
 export const SPEED_MULTIPLIERS = [0, 60, 3600, 86400, 86400 * 7, 86400 * 30, 86400 * 365];
 export const SPEED_LABELS_AR = [
@@ -64,6 +65,8 @@ interface SimulationState {
   selectedGroupIds: number[];
   /** النجمة المحدَّدة من البحث (id داخلي) — تُحاط بعلامة تصويب؛ غير محفوظة بين الجلسات */
   highlightedStarId: number | null;
+  /** الكسوف/الخسوف المختار من لوحة الكسوف (يُرسم مساره على الأرض)؛ غير محفوظ بين الجلسات */
+  eclipseFocus: EclipseFocus | null;
 
   sceneRotationDeg: number;
 
@@ -97,6 +100,7 @@ interface SimulationState {
   clearGroupSelection: () => void;
   /** يحدّد نجمة ويُبرز كوكبتها (أو يلغي التحديد عند null) */
   focusStar: (starId: number | null) => void;
+  setEclipseFocus: (focus: EclipseFocus | null) => void;
   setSceneRotation: (deg: number) => void;
   resetSceneRotation: () => void;
   setViewportSize: (width: number, height: number) => void;
@@ -141,6 +145,7 @@ export const useSimulationStore = create<SimulationState>()(
       selectedMansionIndices: [],
       selectedGroupIds: [],
       highlightedStarId: null,
+      eclipseFocus: null,
 
       sceneRotationDeg: 0,
 
@@ -219,6 +224,7 @@ export const useSimulationStore = create<SimulationState>()(
           highlightedStarId: starId,
           selectedGroupIds: starId == null ? [] : getGroupIdsOfStar(starId),
         }),
+      setEclipseFocus: (focus) => set({ eclipseFocus: focus }),
       setSceneRotation: (deg) => {
         let d = deg % 360;
         if (d < 0) d += 360;

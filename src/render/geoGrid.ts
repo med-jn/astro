@@ -113,7 +113,7 @@ export function drawGeoGrid(
       for (let lat = 80; lat >= -80; lat -= 10) {
         if (lat === 0) continue; // خط الاستواء له اسمه في طبقة المدارات
         const r = ((90 - lat) / 180) * R;
-        fillTextUpright(ctx, `${Math.abs(lat)}°${lat > 0 ? 'ش' : 'ج'}`, cx + dx * r, cy + dy * r, 4, -3);
+        fillTextUpright(ctx, `${Math.abs(lat)}°${lat > 0 ? 'ش' : 'ج'}`, cx + dx * r, cy + dy * r, 6, -(4 + uiScale));
       }
     }
   }
@@ -122,7 +122,7 @@ export function drawGeoGrid(
 
 /** خطوط التوقيت الاسمية: 24 خط طول كل 15° مع اسم كل خط (UTC±n) في موضع مقروء داخل المشهد */
 export function drawNominalTimeZones(
-  ctx: CanvasRenderingContext2D, config: PolarMapConfig, vp: ViewportInfo, uiScale: number
+  ctx: CanvasRenderingContext2D, config: PolarMapConfig, vp: ViewportInfo, uiScale: number, showLabels: boolean
 ): void {
   const { centerX: cx, centerY: cy, outerRadiusPx: R } = config;
   const lw = Math.min(uiScale, 2.5);
@@ -149,7 +149,7 @@ export function drawNominalTimeZones(
   ctx.globalAlpha = 1;
   ctx.font = `bold ${10 * uiScale}px system-ui, sans-serif`;
   ctx.textAlign = 'center';
-  for (let k = 0; k < 24; k++) {
+  for (let k = 0; showLabels && k < 24; k++) {
     const offset = k <= 12 ? k : k - 24;
     const text = k === 0 ? 'UTC' : k === 12 ? 'UTC±12' : offset > 0 ? `UTC+${offset}` : `UTC${offset}`;
     const { dx, dy } = meridianDir(15 * k);
@@ -158,7 +158,7 @@ export function drawNominalTimeZones(
     const x = cx + dx * t;
     const y = cy + dy * t;
     if (x < view.x0 || x > view.x1 || y < view.y0 || y > view.y1) continue;
-    fillTextUpright(ctx, text, x, y);
+    fillTextUpright(ctx, text, x, y, 0, -(6 + 2 * uiScale));
   }
   ctx.restore();
 }
