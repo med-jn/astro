@@ -1,100 +1,50 @@
-import { useId, useMemo } from 'react';
+import { useMemo } from 'react';
 import { fmtDateTime, useI18n, type TKey } from '../i18n';
 import {
   findPhase,
-  illuminationFromElongation,
   lunarState,
   moonAgeDays,
+  moonAppearance,
   phaseIndex,
-  terminatorPath,
 } from '../core/lunar';
-
-const MOON_TEXTURE = '/images/moon.png';
-
-/* ------------------------------------------------------------------ */
-/*  قرص القمر بطوره الحقيقي (بنسيج أو بدونه)                            */
-/* ------------------------------------------------------------------ */
-export function MoonDisc({
-  elongation,
-  size = 160,
-  textured = false,
-  southern = false,
-  label,
-}: {
-  elongation: number;
-  size?: number;
-  textured?: boolean;
-  southern?: boolean;
-  label?: string;
-}) {
-  const uid = useId().replace(/:/g, '');
-  const R = 50;
-  const { d, mirror } = terminatorPath(elongation, R);
-  return (
-    <svg viewBox="-52 -52 104 104" width={size} height={size} role="img" aria-label={label}>
-      <defs>
-        <clipPath id={`clip${uid}`}>
-          <circle r={R} />
-        </clipPath>
-        <radialGradient id={`lit${uid}`} cx="40%" cy="38%" r="75%">
-          <stop offset="0" stopColor="#f3f5f8" />
-          <stop offset="1" stopColor="#a9b2be" />
-        </radialGradient>
-        <filter id={`soft${uid}`} x="-10%" y="-10%" width="120%" height="120%">
-          <feGaussianBlur stdDeviation={textured ? 1.1 : 0.5} />
-        </filter>
-      </defs>
-      <g transform={southern ? 'rotate(180)' : undefined}>
-        <g clipPath={`url(#clip${uid})`}>
-          {textured ? (
-            <>
-              <circle r={R} fill="#8d96a3" />
-              <image href={MOON_TEXTURE} x={-R} y={-R} width={2 * R} height={2 * R} preserveAspectRatio="xMidYMid slice" />
-            </>
-          ) : (
-            <circle r={R} fill={`url(#lit${uid})`} />
-          )}
-          {/* الجزء المظلم: يبقى النسيج خافتاً تحته ليمثل الضوء الرمادي (earthshine) */}
-          <g transform={mirror ? 'scale(-1 1)' : undefined}>
-            <path d={d} fill="#04060a" fillOpacity={0.88} filter={`url(#soft${uid})`} />
-          </g>
-        </g>
-        <circle r={R} fill="none" stroke="rgba(255,255,255,0.22)" strokeWidth={0.8} />
-      </g>
-    </svg>
-  );
-}
+import { MoonCanvas, MoonDisc } from './MoonCanvas';
 
 /* ------------------------------------------------------------------ */
-/*  مخطط المدار: الأرض في المركز والشمس نحو اليمين                      */
+/*  موضع الشمس والقمر على دائرة البروج (قراءة موضعية محايدة)             */
 /* ------------------------------------------------------------------ */
-function OrbitDiagram({ elongation }: { elongation: number }) {
+function EclipticDial({ sunLon, moonLon, elongation }: { sunLon: number; moonLon: number; elongation: number }) {
   const { t } = useI18n();
-  const r = 56;
-  const rad = (elongation * Math.PI) / 180;
-  const mx = 100 + r * Math.cos(rad);
-  const my = 70 - r * Math.sin(rad); // عكس عقارب الساعة كما يُرى من الشمال السماوي
+  const cx = 100, cy = 100, r = 76;
+  const at = (lon: number, rad: number) => ({
+    x: cx + rad * Math.cos((lon * Math.PI) / 180),
+    y: cy - rad * Math.sin((lon * Math.PI) / 180),
+  });
+  const s = at(sunLon, r);
+  const m = at(moonLon, r);
+  const sep = elongation > 180 ? 360 - elongation : elongation;
   return (
-    <svg viewBox="0 0 200 140" className="orbit-svg" role="img" aria-label={t('orbit_title')}>
-      {/* أشعة الشمس */}
-      {[-40, -20, 0, 20, 40].map((y) => (
-        <line key={y} x1={196} y1={70 + y} x2={150} y2={70 + y} className="orbit-ray" />
-      ))}
-      <text x={194} y={14} textAnchor="end" className="orbit-text">
-        {t('orbit_sun')} ›
-      </text>
-      <circle cx={100} cy={70} r={r} className="orbit-path" />
-      <circle cx={100} cy={70} r={9} className="orbit-earth" />
-      <line x1={100} y1={70} x2={mx} y2={my} className="orbit-link" />
-      {/* القمر: نصفه المواجه للشمس مضيء دائماً */}
-      <g transform={`translate(${mx} ${my})`}>
-        <circle r={6.5} className="orbit-moon-dark" />
-        <path d="M 0 -6.5 A 6.5 6.5 0 0 1 0 6.5 Z" className="orbit-moon-lit" />
-      </g>
-      <text x={6} y={134} className="orbit-text">
-        {t('orbit_note')}
-      </text>
-    </svg>
+    <figure className="dial-figure">
+      <svg viewBox="0 0 200 200" className="dial-svg" role="img" aria-label={t('dial_title')}>
+        <circle cx={cx} cy={cy} r={r} className="dial-ring" />
+        {Array.from({ length: 12 }, (_, i) => {
+          const a = at(i * 30, r - 6);
+          const b = at(i * 30, r + 4);
+          const l = at(i * 30, r + 15);
+          return (
+            <g key={i}>
+              <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} className="dial-tick" />
+              <text x={l.x} y={l.y + 3} textAnchor="middle" className="dial-label">{i * 30}°</text>
+            </g>
+          );
+        })}
+        <line x1={s.x} y1={s.y} x2={m.x} y2={m.y} className="dial-link" />
+        <circle cx={s.x} cy={s.y} r={7} className="dial-sun" />
+        <circle cx={m.x} cy={m.y} r={5.5} className="dial-moon" />
+      </svg>
+      <figcaption>
+        {t('dial_title')} · {t('dial_sep')} <span className="num">{sep.toFixed(1)}°</span>
+      </figcaption>
+    </figure>
   );
 }
 
@@ -112,22 +62,23 @@ export function MoonSimulator({
   date,
   elongation,
   latitudeDeg,
+  longitudeDeg,
   onGoTo,
 }: {
   date: Date;
   elongation: number;
   latitudeDeg: number;
+  longitudeDeg: number;
   onGoTo: (d: Date) => void;
 }) {
   const { t, locale } = useI18n();
   const southern = latitudeDeg < 0;
   const idx = phaseIndex(elongation);
-  const illum = illuminationFromElongation(elongation);
-  const age = moonAgeDays(elongation);
+  const age = useMemo(() => moonAgeDays(date), [date]);
   const st = useMemo(() => lunarState(date), [date]);
+  const app = useMemo(() => moonAppearance(date, latitudeDeg, longitudeDeg), [date, latitudeDeg, longitudeDeg]);
   const diamArcmin = st.moonSemiDia * 2 * 60;
 
-  // الأطوار القادمة: تُعاد حسابها كل ساعة محاكاة فقط
   const hourKey = Math.floor(date.getTime() / 3_600_000);
   const upcoming = useMemo(
     () =>
@@ -141,21 +92,21 @@ export function MoonSimulator({
     <div className="sim">
       <div className="sim-hero">
         <figure className="moon-figure">
-          <MoonDisc elongation={elongation} size={168} textured southern={southern} label={t(`phase_${idx}` as TKey)} />
-          <figcaption>{t(southern ? 'view_south' : 'view_north')}</figcaption>
+          <div className="moon-stage">
+            <MoonCanvas appearance={app} size={150} label={t(`phase_${idx}` as TKey)} />
+          </div>
+          <figcaption>{t('view_local')}</figcaption>
         </figure>
         <div className="sim-hero-side">
           <div className="phase-name">{t(`phase_${idx}` as TKey)}</div>
           <dl className="metric-grid metric-grid-1">
             <div className="metric">
               <dt>{t('m_illum')}</dt>
-              <dd className="num">{(illum * 100).toFixed(1)}%</dd>
+              <dd className="num">{(app.illumination * 100).toFixed(1)}%</dd>
             </div>
             <div className="metric">
               <dt>{t('m_age')}</dt>
-              <dd className="num">
-                {age.toFixed(1)} {t('unit_d')}
-              </dd>
+              <dd className="num">{age.toFixed(1)} {t('unit_d')}</dd>
             </div>
             <div className="metric">
               <dt>{t('m_elong')}</dt>
@@ -167,14 +118,13 @@ export function MoonSimulator({
 
       <div className="phase-strip" role="list">
         {Array.from({ length: 8 }, (_, i) => (
-          <div key={i} role="listitem" className="phase-strip-item" data-current={i === idx}>
-            <MoonDisc elongation={i * 45} size={30} label={t(`phase_${i}` as TKey)} southern={southern} />
+          <div key={i} role="listitem" className="phase-strip-item" data-current={i === idx} title={t(`phase_${i}` as TKey)}>
+            <MoonDisc elongation={i * 45} size={30} southern={southern} label={t(`phase_${i}` as TKey)} />
           </div>
         ))}
       </div>
 
-      <div className="sim-section-title">{t('orbit_title')}</div>
-      <OrbitDiagram elongation={elongation} />
+      <EclipticDial sunLon={st.sunLon} moonLon={st.moonLon} elongation={elongation} />
 
       <div className="sim-section-title">{t('m_next')}</div>
       <ul className="event-list">
@@ -182,16 +132,14 @@ export function MoonSimulator({
           const days = (p.when.getTime() - date.getTime()) / 86_400_000;
           return (
             <li key={p.deg} className="event-row">
-              <MoonDisc elongation={p.deg} size={26} label="" southern={southern} />
+              <MoonDisc elongation={p.deg} size={26} southern={southern} />
               <span className="event-main">
                 <span className="event-title">{t(`phase_${p.idx}` as TKey)}</span>
                 <span className="event-sub num">
                   {fmtDateTime(p.when, locale.date)} · {t('in_days', { n: days.toFixed(1) })}
                 </span>
               </span>
-              <button className="chip-btn" onClick={() => onGoTo(p.when)}>
-                {t('go_to')}
-              </button>
+              <button className="chip-btn" onClick={() => onGoTo(p.when)}>{t('go_to')}</button>
             </li>
           );
         })}
@@ -200,9 +148,7 @@ export function MoonSimulator({
       <dl className="metric-grid">
         <div className="metric">
           <dt>{t('m_dist')}</dt>
-          <dd className="num">
-            {Math.round(st.moonDistKm).toLocaleString('en-US')} {t('unit_km')}
-          </dd>
+          <dd className="num">{Math.round(st.moonDistKm).toLocaleString('en-US')} {t('unit_km')}</dd>
         </div>
         <div className="metric">
           <dt>{t('m_diam')}</dt>

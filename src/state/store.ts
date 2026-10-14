@@ -42,6 +42,8 @@ export interface LayerToggles {
   observerMarker: boolean;
   /** قبة الراصد: السماء المحلية فوق موقعه بكل الأجرام (انظر render/observerDome.ts) */
   observerDome: boolean;
+  /** الشفق القطبي الشمالي على قبة الراصد (بيضة فيلدشتاين–ستاركوف، انظر core/aurora.ts) */
+  aurora: boolean;
 }
 
 interface SimulationState {
@@ -67,6 +69,9 @@ interface SimulationState {
   highlightedStarId: number | null;
   /** الكسوف/الخسوف المختار من لوحة الكسوف (يُرسم مساره على الأرض)؛ غير محفوظ بين الجلسات */
   eclipseFocus: EclipseFocus | null;
+  /** مؤشر Kp (0..9) المحاكى لنشاط الشفق — لا بيانات تاريخية، فهو اختيار المستخدم */
+  auroraKp: number;
+  setAuroraKp: (kp: number) => void;
 
   sceneRotationDeg: number;
 
@@ -139,6 +144,7 @@ export const useSimulationStore = create<SimulationState>()(
         labels: false,
         observerMarker: false,
         observerDome: false,
+        aurora: false,
       },
       timeZoneKind: 'nominal',
       selectedZodiacs: [],
@@ -146,6 +152,8 @@ export const useSimulationStore = create<SimulationState>()(
       selectedGroupIds: [],
       highlightedStarId: null,
       eclipseFocus: null,
+      auroraKp: 4,
+      setAuroraKp: (kp) => set({ auroraKp: Math.max(0, Math.min(9, kp)) }),
 
       sceneRotationDeg: 0,
 
@@ -259,6 +267,7 @@ export const useSimulationStore = create<SimulationState>()(
         selectedGroupIds: s.selectedGroupIds,
         sceneRotationDeg: s.sceneRotationDeg,
         speedIndex: s.speedIndex,
+        auroraKp: s.auroraKp,
       }),
     }
   )

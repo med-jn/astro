@@ -25,6 +25,9 @@ import { getAllLunarMansions, MANSION_SPAN_DEG } from '../core/mansions';
 import { eclipticLongitudeToEquatorial } from '../core/eclipticTransform';
 import { PLANET_COLORS, PLANET_LABELS_AR } from '../core/bodies';
 import { fillTextUpright, getSceneRotationRad, labelGap } from './uprightText';
+import { computeAuroraArcs, auroraBrightness, type AuroraArc } from '../core/aurora';
+import { directSunLight } from '../core/skyRadiance';
+import { getDomeSkyCanvas, DOME_SKY_SIZE } from './domeSky';
 import { limitingMagnitude, makeSkyFrame, placeRaDecJ2000, refractionDeg, StarField, starAlpha } from '../core/skyModel';
 import { getMoonImage } from './bodyImages';
 import { paintEarthShadowDisc, moonTexFromAxes } from './eclipseOverlay';
@@ -35,6 +38,21 @@ const TAU = Math.PI * 2;
 
 /** نصف قطر الأرض ÷ (نصف محيط الأرض): R_map يمثل π·6371 كم، فقبة الأرض = R_map ÷ π */
 export const DOME_RADIUS_FRACTION = 1 / Math.PI;
+
+/**
+ * إسقاط القبة. «equidistant» (الافتراضي): نصف القطر خطي مع المسافة السمتية ρ=(90−ارتفاع)/90، فيأخذ أدنى 10° فوق الأفق نحو 11% من
+ * نصف القطر — وهي المنطقة التي يعيش فيها الفجر والشفق والغروب. «orthographic»: ρ=cos(ارتفاع) يضغط هذه الـ10° في ~1.5% فيستحيل رؤية
+ * نطاق الفجر، لكنه يحاكي كرة سماوية منظورة من الجانب.
+ */
+export type DomeProjection = 'equidistant' | 'orthographic';
+export const DOME_PROJECTION: DomeProjection = 'equidistant';
+
+/** نصف القطر النسبي (0 سمت … 1 أفق، >1 تحت الأفق) لارتفاع معيّن */
+export function domeRho(altDeg: number): number {
+  if (DOME_PROJECTION === 'equidistant') return (90 - altDeg) / 90;
+  const alt = altDeg * (Math.PI / 180);
+  return alt >= 0 ? Math.cos(alt) : 1 - Math.sin(alt);
+}
 
 /** true: كل نجم وكوكب يظهر بحسب قدره وارتفاعه والشفق وضوء القمر (ما يراه الراصد الفعلي).
  *  false: النجوم كلها تظهر معاً تدريجياً مع حلول الليل، والكواكب (المفعَّلة) دائماً. */
@@ -96,9 +114,8 @@ export function computeDomeFrame(config: PolarMapConfig, observer: ObserverLocat
 
 /** نقطة على القبة. ما تحت الأفق يُوضَع خارج القرص (فيُقصّ) بدل أن ينعكس فوق الأفق */
 export function domePoint(f: DomeFrame, altDeg: number, azDeg: number): { x: number; y: number } {
-  const alt = altDeg * DEG;
   const az = azDeg * DEG;
-  const rho = alt >= 0 ? Math.cos(alt) : 1 - Math.sin(alt);
+  const rho = domeRho(altDeg);
   const dx = Math.cos(az) * f.nx + Math.sin(az) * f.ex;
   const dy = Math.cos(az) * f.ny + Math.sin(az) * f.ey;
   return { x: f.px + f.radius * rho * dx, y: f.py + f.radius * rho * dy };
@@ -135,15 +152,6 @@ const HORIZON_RGB: [number, RGB][] = [
   [25, [176, 212, 246]], [10, [190, 212, 238]], [4, [176, 192, 222]], [0, [150, 156, 198]],
   [-3, [112, 114, 172]], [-6, [70, 72, 138]], [-9, [38, 46, 106]], [-12, [17, 25, 66]], [-18, [4, 8, 24]],
 ];
-/** لون وهج الشفق حول اتجاه الشمس وشدّته */
-const GLOW_RGB: [number, RGB][] = [
-  [25, [255, 248, 230]], [8, [255, 226, 170]], [2, [255, 190, 110]], [-1, [255, 150, 90]],
-  [-4, [238, 120, 122]], [-7, [200, 108, 156]], [-10, [128, 98, 196]], [-14, [56, 74, 164]], [-18, [20, 30, 90]],
-];
-const GLOW_ALPHA: [number, number][] = [
-  [25, 0.28], [10, 0.5], [2, 0.92], [-1, 1], [-6, 0.9], [-12, 0.62], [-15, 0.32], [-18, 0.1],
-];
-
 /** كان يُستعمل لتلوين القبة بلون واحد؛ يبقى مُصدَّراً للتوافق (لون الأفق عند هذا الارتفاع) */
 export function skyColor(sunAltDeg: number): string {
   const c = mixRGB(lookup(ZENITH_RGB, sunAltDeg), lookup(HORIZON_RGB, sunAltDeg), 0.5);
@@ -162,47 +170,25 @@ export function starVisibility(sunAltDeg: number): number {
  * والنصف المقابل ليلاً)، وفي الجهة المقابلة ظلّ الأرض الأزرق الداكن. أثناء الكسوف الشمسي يغور اللون نحو الليل
  * ويظهر طوق برتقالي على الأفق كله عند الكلية.
  */
-function paintSky(
-  ctx: CanvasRenderingContext2D, f: DomeFrame, sunAlt: number, sunAz: number,
-  darkness: number, totalK: number, moonLight: number
+const nowSec = () => (typeof performance !== 'undefined' ? performance.now() : Date.now()) / 1000;
+
+/** السماء الفيزيائية: صورة مُحسوبة (domeSky) تُوضَع على القبة بإطار الشمال/الشرق، ثم غسق 360° عند كلية الكسوف */
+function paintDomeSky(
+  ctx: CanvasRenderingContext2D, f: DomeFrame,
+  inp: { sunAlt: number; sunAz: number; moonAlt: number; moonAz: number; moonPhase: number; sunFraction: number },
+  totalK: number
 ) {
-  const altEff = sunAlt - 20 * darkness; // الكسوف يُنزل السماء إلى ما يشبه الشفق
-  const zen = mixRGB(lookup(ZENITH_RGB, altEff), [60, 74, 120], moonLight * 0.5);
-  const hor = mixRGB(lookup(HORIZON_RGB, altEff), [70, 84, 130], moonLight * 0.35);
-
-  const base = ctx.createRadialGradient(f.px, f.py, 0, f.px, f.py, f.radius);
-  base.addColorStop(0, rgbCss(zen));
-  base.addColorStop(0.55, rgbCss(mixRGB(zen, hor, 0.3)));
-  base.addColorStop(0.9, rgbCss(mixRGB(zen, hor, 0.78)));
-  base.addColorStop(1, rgbCss(hor));
-  ctx.fillStyle = base;
-  ctx.fillRect(f.px - f.radius, f.py - f.radius, f.radius * 2, f.radius * 2);
-
-  // وهج الشمس/الفجر: مركزه موضع الشمس على الإسقاط (خارج الحافة إن كانت تحت الأفق)
-  const gA = lookup(GLOW_ALPHA, sunAlt) * (1 - darkness);
-  if (gA > 0.01) {
-    const c = lookup(GLOW_RGB, sunAlt);
-    const sp = domePoint(f, Math.max(sunAlt, -24), sunAz);
-    const rad = f.radius * (0.42 + 0.5 * clamp01((sunAlt + 18) / 22));
-    const g = ctx.createRadialGradient(sp.x, sp.y, 0, sp.x, sp.y, rad);
-    g.addColorStop(0, rgbCss(c, gA));
-    g.addColorStop(0.35, rgbCss(c, gA * 0.55));
-    g.addColorStop(0.7, rgbCss(mixRGB(c, zen, 0.5), gA * 0.18));
-    g.addColorStop(1, rgbCss(c, 0));
-    ctx.fillStyle = g;
-    ctx.fillRect(f.px - f.radius, f.py - f.radius, f.radius * 2, f.radius * 2);
-  }
-
-  // ظلّ الأرض في الجهة المقابلة للشمس عند الغسق/الفجر: حزام داكن أزرق على الأفق المقابل
-  const shadowK = smoothstep(-16, -2, sunAlt) * (1 - smoothstep(4, 10, sunAlt));
-  if (shadowK > 0.02) {
-    const ap = domePoint(f, 0, sunAz + 180);
-    const g = ctx.createRadialGradient(ap.x, ap.y, 0, ap.x, ap.y, f.radius * 0.95);
-    g.addColorStop(0, `rgba(12, 18, 54, ${(0.55 * shadowK).toFixed(3)})`);
-    g.addColorStop(1, 'rgba(12, 18, 54, 0)');
-    ctx.fillStyle = g;
-    ctx.fillRect(f.px - f.radius, f.py - f.radius, f.radius * 2, f.radius * 2);
-  }
+  const img = getDomeSkyCanvas(inp, nowSec() * 1000);
+  const s = (2 * f.radius) / DOME_SKY_SIZE;
+  // محور x للصورة = الشرق، محور y (لأسفل) = −الشمال
+  const a = f.ex * s, b = f.ey * s, c = -f.nx * s, d = -f.ny * s;
+  const tx = f.px - (DOME_SKY_SIZE / 2) * (a + c), ty = f.py - (DOME_SKY_SIZE / 2) * (b + d);
+  ctx.save();
+  ctx.transform(a, b, c, d, tx, ty);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(img, 0, 0);
+  ctx.restore();
 
   // الكلية: غروب 360° برتقالي خافت على الأفق كله
   if (totalK > 0.01) {
@@ -213,6 +199,94 @@ function paintSky(
     ctx.fillStyle = g;
     ctx.fillRect(f.px - f.radius, f.py - f.radius, f.radius * 2, f.radius * 2);
   }
+}
+
+/**
+ * قرص الشمس بحسب ارتفاعها الظاهري: اللون من انطفاء الجو على الكتلة الهوائية (برتقالي محمرّ عند الأفق ثم أصفر فأبيض)،
+ * والسطوع لوغاريتمي — عند الشروق/الغروب خافت لكن حدوده حادّة واضحة، وفي الظهيرة ساطع جداً يحترق قلبه إلى الأبيض وتحيط به هالة واسعة.
+ */
+function paintDomeSun(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, altApp: number) {
+  const { rgb, rel } = directSunLight(altApp);
+  // اللون: نسب القنوات بأسّ 0.33 (تكيّف العين يخفّف تطرف اللون الفيزيائي) ثم تطبيع
+  const hue = rgb.map((v) => Math.pow(Math.max(v, 1e-9), 0.33));
+  const hm = Math.max(hue[0], hue[1], hue[2]);
+  const col = hue.map((v) => v / hm);
+  // السطوع المُدرَك 0..1 من نسبة السطوع الفيزيائية (لوغاريتمي)
+  const i = clamp01(0.45 + 0.55 * (Math.log10(Math.max(rel, 1e-4)) + 3) / 3);
+  const over = smoothstep(0.78, 1, i); // احتراق القلب إلى الأبيض عند الظهيرة
+  const to255 = (v: number) => Math.round(255 * clamp01(v));
+  const mixW = (v: number, w: number) => v + (1 - v) * w;
+  // قرص مضيء دائماً (الخفوت عند الأفق في غياب الهالة لا في عتمة القرص): برتقالي/أحمر نابض ثم أصفر فأبيض
+  const body = [col[0], col[1], col[2]].map((v) => v * (0.9 + 0.1 * i));
+  const coreW = 0.5 * i * (1 - over) + over; // قلب أسطع من محيطه فيبرز القرص على أفق برتقالي
+  const core = body.map((v) => mixW(v, coreW));
+  const edge = body.map((v) => mixW(v * 0.9, 0.95 * over));
+  const css = (v: number[], a = 1) => `rgba(${to255(v[0])}, ${to255(v[1])}, ${to255(v[2])}, ${a})`;
+
+  // الهالة: واسعة وساطعة ظهراً، شبه معدومة عند الأفق
+  const gr = r * (1.4 + 3.4 * Math.pow(i, 2.2));
+  const gA = 0.05 + 0.45 * Math.pow(i, 3);
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  const glow = ctx.createRadialGradient(x, y, r * 0.6, x, y, gr);
+  glow.addColorStop(0, css(body.map((v) => mixW(v, 0.4 * over)), gA));
+  glow.addColorStop(0.35, css(body, gA * 0.4));
+  glow.addColorStop(1, css(body, 0));
+  ctx.fillStyle = glow;
+  ctx.beginPath(); ctx.arc(x, y, gr, 0, TAU); ctx.fill();
+  ctx.restore();
+
+  // القرص: حدّه حادّ عند الأفق ويلين ظهراً (يذوب في الهالة)
+  const soft = over;
+  const disc = ctx.createRadialGradient(x, y, 0, x, y, r);
+  disc.addColorStop(0, css(core));
+  disc.addColorStop(0.72, css(mixRGBf(core, edge, 0.5)));
+  disc.addColorStop(Math.max(0.74, 0.97 - 0.2 * soft), css(edge));
+  disc.addColorStop(1, css(edge, 1 - 0.7 * soft));
+  ctx.fillStyle = disc;
+  ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill();
+  if (soft < 0.5) {
+    ctx.strokeStyle = css(body.map((v) => v * 0.78), 0.9);
+    ctx.lineWidth = Math.max(0.8, r * 0.05);
+    ctx.beginPath(); ctx.arc(x, y, r * 0.985, 0, TAU); ctx.stroke();
+  }
+}
+const mixRGBf = (a: number[], b: number[], t: number) => a.map((v, k) => v * (1 - t) + b[k] * t);
+
+/** الشفق: ستائر رأسية بتدرج لوني بحسب الارتفاع (حافة سفلى وردية، جسم أخضر، قمة حمراء خافتة)، بمزج إضافي */
+function paintAurora(ctx: CanvasRenderingContext2D, f: DomeFrame, arcs: AuroraArc[], alpha: number) {
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  for (const arc of arcs) {
+    const s = arc.samples;
+    for (let i = 0; i < s.length - 1; i++) {
+      const a = s[i], b = s[i + 1];
+      if (Math.max(a.bottom.alt, b.bottom.alt, a.top.alt, b.top.alt) < -2) continue;
+      const I = ((a.intensity + b.intensity) / 2) * arc.weight * alpha;
+      if (I < 0.015) continue;
+      // كل شريحة أعرض من خطوتها (تتداخل مع جاراتها) فتذوب الحواف الرأسية بدل أن تظهر كمكعبات
+      const pa = s[Math.max(0, i - 1)], pb = s[Math.min(s.length - 1, i + 2)];
+      const b1 = domePoint(f, pa.bottom.alt, pa.bottom.az), b2 = domePoint(f, pb.bottom.alt, pb.bottom.az);
+      const t1 = domePoint(f, pa.top.alt, pa.top.az), t2 = domePoint(f, pb.top.alt, pb.top.az);
+      const x0 = (b1.x + b2.x) / 2, y0 = (b1.y + b2.y) / 2, x1 = (t1.x + t2.x) / 2, y1 = (t1.y + t2.y) / 2;
+      if (Math.hypot(x1 - x0, y1 - y0) < 0.5) continue;
+      const g = ctx.createLinearGradient(x0, y0, x1, y1);
+      const A = Math.min(0.4, I * 0.34);
+      g.addColorStop(0, 'rgba(220, 90, 190, 0)');
+      g.addColorStop(0.03, `rgba(225, 100, 200, ${(A * 0.55).toFixed(3)})`);
+      g.addColorStop(0.08, `rgba(70, 255, 150, ${A.toFixed(3)})`);
+      g.addColorStop(0.28, `rgba(60, 235, 140, ${(A * 0.6).toFixed(3)})`);
+      g.addColorStop(0.55, `rgba(110, 220, 120, ${(A * 0.16).toFixed(3)})`);
+      g.addColorStop(0.8, `rgba(235, 70, 80, ${(A * 0.1).toFixed(3)})`);
+      g.addColorStop(1, 'rgba(235, 70, 80, 0)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.moveTo(b1.x, b1.y); ctx.lineTo(b2.x, b2.y); ctx.lineTo(t2.x, t2.y); ctx.lineTo(t1.x, t1.y);
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
+  ctx.restore();
 }
 
 // ───────────────────────────── الرسم ─────────────────────────────
@@ -241,12 +315,15 @@ export interface DomeInput {
   selectedMansionIndices: number[];
   selectedGroupIds: number[];
   highlightedStarId: number | null;
-  /** طبقة «النجوم»: لا يُرسم نجم ولا اسمه ولا هدف تحويم له إن كانت مغلقة (تحديدات الكوكبات والأبراج تبقى لأنها اختيار صريح) */
   /** بكسل لكل درجة عند السمت (القيمة نفسها التي تعاير بها الخريطة الشمس والقمر) */
   pxPerDeg: number;
   /** معامل تضخيم الأقطار الزاوية (ANGULAR_SIZE_VISUAL_BOOST في skyRenderer): الشمس والقمر والكواكب بصيغة واحدة */
   angularBoost: number;
+  /** طبقة «النجوم»: لا يُرسم نجم ولا اسمه ولا هدف تحويم له إن كانت مغلقة (تحديدات الكوكبات والأبراج تبقى لأنها اختيار صريح) */
   showStars: boolean;
+  /** طبقة الشفق القطبي الشمالي ومؤشر النشاط Kp (0..9) */
+  showAurora: boolean;
+  auroraKp: number;
   /** طبقة «الكواكب»: لا يُرسم كوكب ولا اسمه ولا هدف تحويم له إن كانت مغلقة */
   showPlanets: boolean;
   showEcliptic: boolean;
@@ -431,9 +508,11 @@ export function drawObserverDome(
   const moonAlt = input.moon.horizontal.altitudeDeg;
   const moonAz = input.moon.horizontal.azimuthDeg;
   const lw = Math.min(uiScale, 2.5);
+  // بكسل لكل درجة عند السمت بسلّم إسقاط القبة نفسه (فتتسق أحجام الشمس والقمر مع إحداثياتهما عليها)
+  const domePxPerDeg = DOME_PROJECTION === 'equidistant' ? f.radius / 90 : f.radius * DEG;
   // معايرة الأحجام: نصف قطر الجرم = (قطره الزاوي ÷ 2) × بكسل/درجة × التضخيم، كما في الخريطة تماماً
   const radiusOf = (angDeg: number | undefined, fallback: number) =>
-    Math.max(4, ((angDeg ?? fallback) / 2) * input.pxPerDeg * input.angularBoost);
+    Math.max(4, ((angDeg ?? fallback) / 2) * domePxPerDeg * input.angularBoost);
   const sunRadiusPx = radiusOf(input.sun.angularSizeDeg, FALLBACK_SUN_ANGULAR_DEG);
   const moonRadiusPx = radiusOf(input.moon.angularSizeDeg, FALLBACK_MOON_ANGULAR_DEG);
 
@@ -496,7 +575,9 @@ export function drawObserverDome(
   ctx.beginPath();
   ctx.arc(f.px, f.py, f.radius, 0, TAU);
   ctx.clip();
-  paintSky(ctx, f, sunAlt, sunAz, darkness, totalK, moonLight);
+  paintDomeSky(ctx, f, {
+    sunAlt, sunAz, moonAlt, moonAz, moonPhase: input.moon.phaseFraction ?? 0, sunFraction: solar ? 1 - obsc : 1,
+  }, totalK);
 
   // شبكة القبة: دائرتا 30° و60° متقطعتان، خط الشرق–الغرب، وخط الشمال الأحمر (وجنوبه خافت)
   const dayK = smoothstep(-4, 10, altEff);
@@ -506,7 +587,7 @@ export function drawObserverDome(
   ctx.setLineDash([3 * lw, 4 * lw]);
   ctx.beginPath();
   for (const alt of [30, 60]) {
-    const r = f.radius * Math.cos(alt * DEG);
+    const r = f.radius * domeRho(alt);
     ctx.moveTo(f.px + r, f.py);
     ctx.arc(f.px, f.py, r, 0, TAU);
   }
@@ -531,8 +612,21 @@ export function drawObserverDome(
     ctx.fillStyle = rgbCss(gridRGB, 0.7);
     ctx.textAlign = 'left';
     for (const alt of [30, 60]) {
-      const r = f.radius * Math.cos(alt * DEG);
+      const r = f.radius * domeRho(alt);
       fillTextUpright(ctx, `${alt}°`, f.px + f.nx * r + f.ex * 3 * uiScale, f.py + f.ny * r + f.ey * 3 * uiScale, 0, 0);
+    }
+  }
+
+  // الشفق القطبي الشمالي: ليلاً فقط، ويخبو مع الشفق المدني وضوء القمر
+  if (input.showAurora) {
+    const dark = smoothstep(-6, -13, sunAlt) * (1 - 0.7 * smoothstep(0.35, 1, moonLight));
+    if (dark > 0.02) {
+      const arcs = computeAuroraArcs({
+        kp: input.auroraKp, latDeg: lat, lonDeg: input.observer.longitudeDeg,
+        sunRaHours: input.sun.equatorial.rightAscensionHours, sunDecDeg: input.sun.equatorial.declinationDeg,
+        gmstDeg: input.gmstDeg, timeSec: nowSec(),
+      });
+      paintAurora(ctx, f, arcs, dark * auroraBrightness(input.auroraKp));
     }
   }
 
@@ -781,7 +875,7 @@ export function drawObserverDome(
   const paintSun = () => {
     ctx.save();
     ctx.globalAlpha = 0.1 + 0.9 * Math.sqrt(clamp01(1 - obsc));
-    helpers.drawSun(ctx, sunV, bodyRadius);
+    paintDomeSun(ctx, sunV.x, sunV.y, bodyRadius, sunAlt);
     ctx.restore();
   };
 

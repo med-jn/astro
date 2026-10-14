@@ -2,7 +2,7 @@ import { useEffect, useState, type CSSProperties, type ElementType, type ReactNo
 import {
   Play, Pause, Clock, MapPinned, LocateFixed, Globe2, Contrast, Orbit, Route, Radar,
   CircleDot, Star, Disc, Tag, Compass, Sparkles, X, Plus, Minus, RotateCcw, Moon,
-  Grid3x3, Clock3, Telescope, Menu, ChevronRight, Languages,
+  Grid3x3, Clock3, Telescope, Menu, ChevronRight, ArrowLeft, Settings as SettingsIcon, Info,
 } from 'lucide-react';
 import { SPEED_LABELS_AR, useSimulationStore, type LayerToggles } from '../state/store';
 import { ZODIAC_ORDER, type ZodiacKey } from '../core/zodiac';
@@ -11,6 +11,7 @@ import { getAllLunarMansions } from '../core/mansions';
 import { findPhase } from '../core/lunar';
 import { fmtClock, fmtDateLong, monthName, toInputValue, useI18n, type TKey } from '../i18n';
 import { CITIES, mansionName, zodiacName } from '../i18n/names';
+import { formatCoord, resetSettings, updateSettings, useSettings } from '../settings';
 import { StarSearchBar } from './StarSearchBar';
 import { EclipsePanel } from './EclipsePanel';
 
@@ -21,7 +22,7 @@ const LAYER_ICONS: Record<keyof LayerToggles, ElementType> = {
   land: Globe2, terminator: Contrast, tropics: Orbit, meridians: Route,
   equatorialGrid: Radar, mansions: Sparkles, ecliptic: CircleDot,
   stars: Star, planets: Disc, labels: Tag, observerMarker: MapPinned,
-  gridFull: Grid3x3, timeZones: Clock3, observerDome: Telescope,
+  gridFull: Grid3x3, timeZones: Clock3, observerDome: Telescope, aurora: Sparkles,
 };
 
 const SURFACE_KEYS: (keyof LayerToggles)[] = ['land', 'terminator'];
@@ -31,7 +32,7 @@ const SKY_KEYS: (keyof LayerToggles)[] = ['stars', 'planets'];
 
 const JUMP_PHASES = [0, 90, 180, 270] as const; // محاق، تربيع أول، بدر، تربيع أخير
 
-type PopoverKey = 'time' | 'observer' | 'ground' | 'sky' | 'zodiac' | 'mansions' | null;
+type PopoverKey = 'time' | 'observer' | 'ground' | 'sky' | 'zodiac' | 'mansions' | 'settings' | null;
 type DateField = 'year' | 'month' | 'day' | 'hour' | 'minute';
 
 function addToDateField(date: Date, field: DateField, delta: number): Date {
@@ -47,6 +48,7 @@ function addToDateField(date: Date, field: DateField, delta: number): Date {
 /* ------------------------------------------------------------------ */
 /*  مكوّنات صغيرة مشتركة                                                */
 /* ------------------------------------------------------------------ */
+/** صفحة تغلّف الشريط الجانبي بالكامل (حاسوب وموبايل)، وزر الرجوع يعيد القائمة السابقة. */
 function Flyout({ icon: Icon, title, onClose, children }: {
   icon: ElementType; title: string; onClose: () => void; children: ReactNode;
 }) {
@@ -54,11 +56,23 @@ function Flyout({ icon: Icon, title, onClose, children }: {
   return (
     <div className="popover-panel" role="dialog" aria-label={title}>
       <div className="popover-header">
+        <button className="popover-back" onClick={onClose} aria-label={t('back')}><ArrowLeft size={18} className="back-ico" /></button>
         <Icon size={16} />
         <span className="popover-title-text">{title}</span>
-        <button className="popover-close" onClick={onClose} aria-label={t('close')}><X size={16} /></button>
       </div>
       <div className="popover-body">{children}</div>
+    </div>
+  );
+}
+
+function Segmented<T extends string>({ value, options, onChange, label }: {
+  value: T; options: { value: T; label: string }[]; onChange: (v: T) => void; label: string;
+}) {
+  return (
+    <div className="calendar-toggle" role="group" aria-label={label}>
+      {options.map((o) => (
+        <button key={o.value} aria-pressed={value === o.value} onClick={() => onChange(o.value)}>{o.label}</button>
+      ))}
     </div>
   );
 }
@@ -125,6 +139,7 @@ function StepperRow({ label, value, onDec, onInc }: { label: string; value: stri
 function CoordField({ label, value, min, max, pos, neg, onCommit }: {
   label: string; value: number; min: number; max: number; pos: string; neg: string; onCommit: (n: number) => void;
 }) {
+  const { coordFormat } = useSettings();
   const [draft, setDraft] = useState<string | null>(null);
   const rounded = String(Number(value.toFixed(4)));
   const parsed = draft === null ? value : Number(draft.replace(',', '.'));
@@ -147,7 +162,7 @@ function CoordField({ label, value, min, max, pos, neg, onCommit }: {
           if (e.target.value.trim() !== '' && Number.isFinite(n) && n >= min && n <= max) onCommit(n);
         }}
       />
-      <span className="field-hint num">{Math.abs(value).toFixed(4)}° {value >= 0 ? pos : neg}</span>
+      <span className="field-hint num">{formatCoord(value, pos, neg, coordFormat)}</span>
     </label>
   );
 }
@@ -157,6 +172,7 @@ function CoordField({ label, value, min, max, pos, neg, onCommit }: {
 /* ------------------------------------------------------------------ */
 export function ControlsPanel() {
   const { t, lang, locale, setLang, speedLabel } = useI18n();
+  const settings = useSettings();
   const [openPopover, setOpenPopover] = useState<PopoverKey>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [calendarMode, setCalendarMode] = useState<'gregorian' | 'hijri'>('gregorian');
@@ -168,7 +184,7 @@ export function ControlsPanel() {
     selectedZodiacs, selectedMansionIndices,
     setDate, togglePlay, resetToNow, setSpeedIndex, setObserver, toggleLayer,
     toggleZodiacSelection, clearZodiacSelection, toggleMansionSelection, clearMansionSelection,
-    setTimeZoneKind,
+    setTimeZoneKind, auroraKp, setAuroraKp,
   } = useSimulationStore();
 
   const closeAll = () => { setOpenPopover(null); };
@@ -178,17 +194,15 @@ export function ControlsPanel() {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
       if (openPopover) setOpenPopover(null);
-      else setDrawerOpen(false);
+      else closeDrawer();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openPopover]);
 
-  // على الموبايل: فتح نافذة يُغلق الدرج، وتبقى النافذة كصفحة سفلية مستقلة
-  const toggle = (key: PopoverKey) => {
-    setOpenPopover((prev) => (prev === key ? null : key));
-    setDrawerOpen(false);
-  };
+  const toggle = (key: PopoverKey) => setOpenPopover((prev) => (prev === key ? null : key));
+  const closeDrawer = () => { setDrawerOpen(false); setOpenPopover(null); };
 
   const hijriFmt = (d: Date) => {
     try {
@@ -208,6 +222,9 @@ export function ControlsPanel() {
   const skyOn = SKY_KEYS.filter((k) => layers[k]).length;
   const latHint = `${Math.abs(observer.latitudeDeg).toFixed(2)}°${observer.latitudeDeg >= 0 ? t('dir_n') : t('dir_s')}`;
   const lonHint = `${Math.abs(observer.longitudeDeg).toFixed(2)}°${observer.longitudeDeg >= 0 ? t('dir_e') : t('dir_w')}`;
+  const lonLatHint = settings.coordFormat === 'decimal'
+    ? `${latHint} · ${lonHint}`
+    : `${formatCoord(observer.latitudeDeg, t('dir_n'), t('dir_s'), 'dms')} · ${formatCoord(observer.longitudeDeg, t('dir_e'), t('dir_w'), 'dms')}`;
 
   const locate = () => {
     if (!navigator.geolocation) return setGeoStatus('failed');
@@ -231,18 +248,13 @@ export function ControlsPanel() {
       <button className="menu-fab" data-hidden={drawerOpen} onClick={() => setDrawerOpen(true)} aria-label={t('menu_open')}>
         <Menu size={22} />
       </button>
-      {drawerOpen && <button className="drawer-backdrop" onClick={() => setDrawerOpen(false)} aria-label={t('menu_close')} />}
-      {openPopover && <button className="popover-backdrop" onClick={closeAll} aria-label={t('close')} />}
+      {drawerOpen && <button className="drawer-backdrop" onClick={closeDrawer} aria-label={t('menu_close')} />}
 
       <nav className="controls-panel" data-open={drawerOpen} aria-label={t('nav_aria')}>
         <div className="sidebar-brand">
           <Moon size={20} />
           <span className="brand-name">{t('app_name')}</span>
-          <button className="lang-btn" onClick={() => setLang(lang === 'ar' ? 'en' : 'ar')} aria-label="Language / اللغة">
-            <Languages size={15} />
-            <span>{t('lang_switch')}</span>
-          </button>
-          <button className="drawer-close" onClick={() => setDrawerOpen(false)} aria-label={t('menu_close')}>
+          <button className="drawer-close" onClick={closeDrawer} aria-label={t('menu_close')}>
             <X size={18} />
           </button>
         </div>
@@ -260,7 +272,7 @@ export function ControlsPanel() {
               {isPlaying ? <Pause size={20} /> : <Play size={20} />}
             </button>
             <button className="clock" data-active={openPopover === 'time'} onClick={() => toggle('time')} aria-label={t('nav_time')}>
-              <span className="clock-time num">{fmtClock(date)}</span>
+              <span className="clock-time num">{fmtClock(date, settings.hour12)}</span>
               <span className="clock-date">
                 {fmtDateLong(date, locale.date)}
                 <span className="clock-speed">{speedLabel(SPEED_LABELS_AR, speedIndex)}</span>
@@ -347,7 +359,7 @@ export function ControlsPanel() {
             <span className="sidebar-section-label">{t('grp_time')}</span>
 
             <div className="icon-item">
-              <NavRow icon={MapPinned} title={t('nav_observer')} hint={`${latHint} · ${lonHint}`}
+              <NavRow icon={MapPinned} title={t('nav_observer')} hint={lonLatHint}
                 active={openPopover === 'observer'} onClick={() => toggle('observer')} />
               {openPopover === 'observer' && (
                 <Flyout icon={MapPinned} title={t('nav_observer')} onClose={closeAll}>
@@ -375,6 +387,19 @@ export function ControlsPanel() {
 
                   <SwitchRow icon={MapPinned} label={t('show_marker')} checked={layers.observerMarker} onChange={() => toggleLayer('observerMarker')} />
                   <SwitchRow icon={Telescope} label={t('dome_toggle')} checked={layers.observerDome} onChange={() => toggleLayer('observerDome')} />
+                  <SwitchRow icon={Sparkles} label={t('layer_aurora')} checked={layers.aurora} onChange={() => toggleLayer('aurora')} />
+                  {layers.aurora && (
+                    <div className="speed-row">
+                      <span className="speed-label">{t('aurora_kp')}</span>
+                      <input
+                        type="range" min={0} max={9} step={0.5} value={auroraKp}
+                        onChange={(e) => setAuroraKp(Number(e.target.value))}
+                        className="slider"
+                        style={{ '--p': `${(auroraKp / 9) * 100}%` } as CSSProperties}
+                      />
+                      <span className="speed-chip num">{auroraKp}</span>
+                    </div>
+                  )}
                 </Flyout>
               )}
             </div>
@@ -421,10 +446,6 @@ export function ControlsPanel() {
               )}
             </div>
 
-            <div className="icon-item">
-              <NavRow icon={Tag} title={t('nav_labels')} hint={t(layers.labels ? 'hint_on' : 'hint_off')}
-                switchState={layers.labels} onClick={() => toggleLayer('labels')} />
-            </div>
           </div>
 
           {/* ===== الإبرازات ===== */}
@@ -487,6 +508,32 @@ export function ControlsPanel() {
               )}
             </div>
           </div>
+        </div>
+        <div className="sidebar-footer">
+          <NavRow icon={SettingsIcon} title={t('nav_settings')} active={openPopover === 'settings'} onClick={() => toggle('settings')} />
+          {openPopover === 'settings' && (
+            <Flyout icon={SettingsIcon} title={t('nav_settings')} onClose={closeAll}>
+              <Section title={t('set_language')}>
+                <Segmented<'ar' | 'en'> label={t('set_language')} value={lang} onChange={setLang}
+                  options={[{ value: 'ar', label: t('set_lang_ar') }, { value: 'en', label: t('set_lang_en') }]} />
+              </Section>
+              <Section title={t('set_display')}>
+                <SwitchRow icon={Tag} label={t('set_labels')} checked={layers.labels} onChange={() => toggleLayer('labels')} />
+                <SwitchRow icon={Info} label={t('set_info_card')} checked={settings.showInfoCard} onChange={() => updateSettings({ showInfoCard: !settings.showInfoCard })} />
+              </Section>
+              <Section title={t('set_time_format')}>
+                <Segmented<'24' | '12'> label={t('set_time_format')} value={settings.hour12 ? '12' : '24'}
+                  onChange={(v) => updateSettings({ hour12: v === '12' })}
+                  options={[{ value: '24', label: t('set_24h') }, { value: '12', label: t('set_12h') }]} />
+              </Section>
+              <Section title={t('set_coords')}>
+                <Segmented<'decimal' | 'dms'> label={t('set_coords')} value={settings.coordFormat}
+                  onChange={(v) => updateSettings({ coordFormat: v })}
+                  options={[{ value: 'decimal', label: t('set_decimal') }, { value: 'dms', label: t('set_dms') }]} />
+              </Section>
+              <button className="btn-wide" onClick={resetSettings}><RotateCcw size={16} /> {t('set_reset')}</button>
+            </Flyout>
+          )}
         </div>
       </nav>
     </>

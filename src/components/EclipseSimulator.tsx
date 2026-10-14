@@ -1,97 +1,67 @@
 import { useEffect, useId, useMemo, useState, type CSSProperties } from 'react';
 import { Moon, Pause, Play, Sun } from 'lucide-react';
 import { fmtClock, fmtDateLong, fmtDateTime, useI18n, type TKey } from '../i18n';
+import { useSettings } from '../settings';
 import {
   findEclipses,
+  lunarContacts,
   lunarViewAt,
-  solarLocalMax,
+  moonAppearance,
+  solarLocalInfo,
   solarViewAt,
+  type Contact,
   type EclipseEvent,
 } from '../core/lunar';
+import { DEFAULT_LOOK, ECLIPSE_LOOKS } from '../core/eclipseLooks';
+import { MoonCanvas } from './MoonCanvas';
 
-const MOON_TEXTURE = '/images/moon.png';
-const C = 120; // مركز مساحة الرسم (240×240)
+/*
+ * عرض محايد: تُعرض الظاهرة كما تُرى في السماء (قرص مضيء ومنطقة مظلمة عليه) دون رسم أي جرم
+ * أو شكل آخر خارج القرص المرصود، ودون نسبة الظاهرة إلى سبب بعينه.
+ */
+
+const C = 120;
+const MIN = 60_000;
 
 /* ------------------------------------------------------------------ */
-/*  كسوف الشمس: منظر مرصدي، الشمال للأعلى والشرق لليسار                 */
+/*  كسوف الشمس: قرص الشمس وجزؤه المظلم                                  */
 /* ------------------------------------------------------------------ */
-function SolarCanvas({ x, y, sunR, moonR, magnitude, sunAlt }: {
-  x: number; y: number; sunR: number; moonR: number; magnitude: number; sunAlt: number;
+function SolarDisc({ x, y, sunR, darkR, magnitude, sunAlt, q }: {
+  x: number; y: number; sunR: number; darkR: number; magnitude: number; sunAlt: number; q: number;
 }) {
   const uid = useId().replace(/:/g, '');
-  const scale = 110; // بكسل لكل درجة (المجال ±~1.1°)
+  const scale = 200;
   const sr = sunR * scale;
-  const mr = moonR * scale;
+  const dr = darkR * scale;
   const night = sunAlt <= 0;
-  const total = magnitude >= 1;
+  const total = magnitude >= 0.999;
   return (
     <svg viewBox="0 0 240 240" className="ecl-svg" role="img">
       <defs>
-        <clipPath id={`f${uid}`}><circle cx={C} cy={C} r={112} /></clipPath>
-        <radialGradient id={`sun${uid}`}>
-          <stop offset="0" stopColor="#fff6d6" />
-          <stop offset="0.8" stopColor="#ffd25e" />
-          <stop offset="1" stopColor="#f2a53a" />
+        <clipPath id={`view${uid}`}><circle cx={C} cy={C} r={114} /></clipPath>
+        <clipPath id={`sun${uid}`}><circle cx={C} cy={C} r={sr} /></clipPath>
+        <radialGradient id={`face${uid}`}>
+          <stop offset="0" stopColor="#fffbe6" />
+          <stop offset="0.75" stopColor="#ffd766" />
+          <stop offset="1" stopColor="#f0a23a" />
         </radialGradient>
-        <radialGradient id={`cor${uid}`}>
-          <stop offset="0.35" stopColor="#ffffff" stopOpacity="0.85" />
-          <stop offset="1" stopColor="#ffffff" stopOpacity="0" />
+        <radialGradient id={`glow${uid}`}>
+          <stop offset="0.3" stopColor="#fff4d0" stopOpacity="0.9" />
+          <stop offset="1" stopColor="#fff4d0" stopOpacity="0" />
         </radialGradient>
+        <filter id={`soft${uid}`}><feGaussianBlur stdDeviation="0.7" /></filter>
       </defs>
-      <g clipPath={`url(#f${uid})`}>
-        <rect width="240" height="240" fill={night ? '#07090d' : '#16233a'} />
-        <circle cx={C} cy={C} r={sr * (total ? 3 : 1.6)} fill={`url(#cor${uid})`} opacity={total ? 0.9 : 0.25} />
-        <circle cx={C} cy={C} r={sr} fill={`url(#sun${uid})`} />
-        <circle cx={C + x * scale} cy={C + y * scale} r={mr} fill="#06080b" stroke="rgba(255,255,255,0.12)" strokeWidth={0.6} />
-        {/* حلقات مرجعية كل 0.5° */}
-        <circle cx={C} cy={C} r={0.5 * scale} className="ecl-ring" />
-        <circle cx={C} cy={C} r={1.0 * scale} className="ecl-ring" />
-        <line x1={C} y1={8} x2={C} y2={232} className="ecl-ring" />
-        <line x1={8} y1={C} x2={232} y2={C} className="ecl-ring" />
-      </g>
-      <circle cx={C} cy={C} r={112} fill="none" className="ecl-frame" />
-      <text x={C} y={14} textAnchor="middle" className="ecl-axis">N</text>
-      <text x={14} y={C + 4} textAnchor="middle" className="ecl-axis">E</text>
-      <text x={226} y={C + 4} textAnchor="middle" className="ecl-axis">W</text>
-    </svg>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/*  خسوف القمر: ظل الأرض عند مسافة القمر                               */
-/* ------------------------------------------------------------------ */
-function LunarCanvas({ x, y, moonR, umbraR, penumbraR }: {
-  x: number; y: number; moonR: number; umbraR: number; penumbraR: number;
-}) {
-  const uid = useId().replace(/:/g, '');
-  const scale = 68;
-  const mx = x * scale;
-  const my = y * scale;
-  const mr = moonR * scale;
-  return (
-    <svg viewBox="0 0 240 240" className="ecl-svg" role="img">
-      <defs>
-        <clipPath id={`f${uid}`}><circle cx={C} cy={C} r={112} /></clipPath>
-        <clipPath id={`m${uid}`}><circle r={mr} /></clipPath>
-      </defs>
-      <g clipPath={`url(#f${uid})`}>
-        <rect width="240" height="240" fill="#07090d" />
-        <circle cx={C} cy={C} r={penumbraR * scale} fill="rgba(150,160,180,0.16)" stroke="rgba(180,190,205,0.45)" strokeDasharray="3 3" strokeWidth={0.8} />
-        <circle cx={C} cy={C} r={umbraR * scale} fill="rgba(0,0,0,0.55)" stroke="rgba(214,168,92,0.7)" strokeWidth={0.9} />
-        <g transform={`translate(${C + mx} ${C + my})`}>
-          <circle r={mr} fill="#8d96a3" />
-          <image href={MOON_TEXTURE} x={-mr} y={-mr} width={2 * mr} height={2 * mr} preserveAspectRatio="xMidYMid slice" clipPath={`url(#m${uid})`} />
-          <g clipPath={`url(#m${uid})`}>
-            <circle cx={-mx} cy={-my} r={penumbraR * scale} fill="rgba(0,0,0,0.28)" />
-            <circle cx={-mx} cy={-my} r={umbraR * scale} fill="rgba(140,38,18,0.72)" />
+      <g clipPath={`url(#view${uid})`}>
+        <rect width="240" height="240" fill={night ? '#05070a' : '#0d1a2e'} />
+        <g transform={`rotate(${q.toFixed(1)} ${C} ${C})`}>
+          <circle cx={C} cy={C} r={sr * (total ? 3.2 : 2)} fill={`url(#glow${uid})`} opacity={total ? 0.85 : 0.28} />
+          <circle cx={C} cy={C} r={sr} fill={`url(#face${uid})`} />
+          {/* الجزء المظلم يُقصّ على القرص نفسه فلا يظهر شيء خارجه */}
+          <g clipPath={`url(#sun${uid})`}>
+            <circle cx={C + x * scale} cy={C + y * scale} r={dr} fill="#04060a" filter={`url(#soft${uid})`} />
           </g>
-          <circle r={mr} fill="none" stroke="rgba(255,255,255,0.2)" strokeWidth={0.6} />
         </g>
       </g>
-      <circle cx={C} cy={C} r={112} fill="none" className="ecl-frame" />
-      <text x={C} y={14} textAnchor="middle" className="ecl-axis">N</text>
-      <text x={14} y={C + 4} textAnchor="middle" className="ecl-axis">E</text>
-      <text x={226} y={C + 4} textAnchor="middle" className="ecl-axis">W</text>
     </svg>
   );
 }
@@ -99,35 +69,38 @@ function LunarCanvas({ x, y, moonR, umbraR, penumbraR }: {
 /* ------------------------------------------------------------------ */
 /*  اللوحة الكاملة                                                      */
 /* ------------------------------------------------------------------ */
-export function EclipseSimulator({
-  date,
-  latitudeDeg,
-  longitudeDeg,
-  onGoTo,
-}: {
-  date: Date;
-  latitudeDeg: number;
-  longitudeDeg: number;
-  onGoTo: (d: Date) => void;
+export function EclipseSimulator({ date, latitudeDeg, longitudeDeg, onGoTo }: {
+  date: Date; latitudeDeg: number; longitudeDeg: number; onGoTo: (d: Date) => void;
 }) {
   const { t, locale } = useI18n();
+  const { hour12 } = useSettings();
   const dayKey = Math.floor(date.getTime() / 86_400_000);
   const events = useMemo(() => findEclipses(new Date(dayKey * 86_400_000), 6), [dayKey]);
 
   const [sel, setSel] = useState(0);
-  const [offset, setOffset] = useState(0); // دقائق حول الذروة
+  const [offset, setOffset] = useState(0);
   const [anim, setAnim] = useState(false);
+  const [lookId, setLookId] = useState(DEFAULT_LOOK.id);
 
   const ev: EclipseEvent | undefined = events[Math.min(sel, events.length - 1)];
   const solar = ev?.kind === 'solar';
-  const range = solar ? 150 : 200;
 
-  // الذروة عند موقع الراصد (للكسوف) أو الذروة العامة (للخسوف)
   const local = useMemo(
-    () => (ev && solar ? solarLocalMax(ev.time, latitudeDeg, longitudeDeg) : null),
+    () => (ev && solar ? solarLocalInfo(ev, latitudeDeg, longitudeDeg) : null),
     [ev, solar, latitudeDeg, longitudeDeg],
   );
-  const center = local ? local.time : ev?.time;
+  const center = solar ? (local ? local.peak : ev?.time) : ev?.time;
+  const contacts: Contact[] = useMemo(
+    () => (!ev ? [] : solar ? local?.contacts ?? [] : lunarContacts(ev)),
+    [ev, solar, local],
+  );
+
+  // نطاق الشريط الزمني: يغطي كل المراحل مع هامش
+  const range = useMemo(() => {
+    if (!center) return 150;
+    const span = contacts.reduce((m, c) => Math.max(m, Math.abs(c.time.getTime() - center.getTime()) / MIN), 0);
+    return Math.min(300, Math.ceil((span || (solar ? 90 : 180)) + 12));
+  }, [contacts, center, solar]);
 
   useEffect(() => {
     if (!anim) return;
@@ -137,16 +110,27 @@ export function EclipseSimulator({
 
   if (!ev || !center) return <p className="muted">{t('ecl_none')}</p>;
 
-  const when = new Date(center.getTime() + offset * 60_000);
+  const when = new Date(center.getTime() + offset * MIN);
   const sv = solar ? solarViewAt(when, latitudeDeg, longitudeDeg) : null;
   const lv = !solar ? lunarViewAt(when) : null;
-  const visible = !!local && local.view.magnitude > 0 && local.view.sunAlt > 0;
+  const app = !solar ? moonAppearance(when, latitudeDeg, longitudeDeg) : null;
+  const look = ECLIPSE_LOOKS.find((l) => l.id === lookId) ?? DEFAULT_LOOK;
+  const eclipseSep = lv ? lv.sep : 99;
+  const haloScale = eclipseSep < 1.3 ? Math.max(0.1, (eclipseSep - 0.35) / 0.95) : 1; // كما في الكانفاس الرئيسي
 
-  const select = (i: number) => {
-    setSel(i);
-    setOffset(0);
+  const select = (i: number) => { setSel(i); setOffset(0); setAnim(false); };
+  const jumpTo = (c: Contact) => {
     setAnim(false);
+    setOffset(Math.max(-range, Math.min(range, Math.round((c.time.getTime() - center.getTime()) / MIN))));
   };
+  const contactLabel = (c: Contact): string => {
+    if (c.key === 'solCentralStart' || c.key === 'solCentralEnd') {
+      return t(`ct_${c.key}_${local?.type === 'annular' ? 'annular' : 'total'}` as TKey);
+    }
+    return t(`ct_${c.key}` as TKey);
+  };
+  const sameDay = (d: Date) => d.toDateString() === center.toDateString();
+  const hasUmbral = !solar && ev.type !== 'faint';
 
   return (
     <div className="sim">
@@ -168,36 +152,64 @@ export function EclipseSimulator({
       </ul>
 
       <div className="ecl-stage">
-        {sv ? (
-          <SolarCanvas x={sv.x} y={sv.y} sunR={sv.sunR} moonR={sv.moonR} magnitude={sv.magnitude} sunAlt={sv.sunAlt} />
-        ) : (
-          lv && <LunarCanvas x={lv.x} y={lv.y} moonR={lv.moonR} umbraR={lv.umbraR} penumbraR={lv.penumbraR} />
-        )}
+        <div className="ecl-visual">
+          {sv && (
+            <SolarDisc x={sv.x} y={sv.y} sunR={sv.sunR} darkR={sv.darkR} magnitude={sv.magnitude} sunAlt={sv.sunAlt} q={sv.q} />
+          )}
+          {lv && app && (
+            <MoonCanvas
+              appearance={app}
+              size={170}
+              haloScale={haloScale}
+              dark={{ cx: lv.cx, cy: lv.cy, coreR: lv.coreR / lv.moonR, haloR: lv.haloR / lv.moonR, look }}
+              label={t('ecl_lunar')}
+            />
+          )}
+        </div>
         <dl className="metric-grid metric-grid-1 ecl-readout">
           {sv && (
             <>
               <div className="metric"><dt>{t('ecl_mag_solar')}</dt><dd className="num">{sv.magnitude.toFixed(3)}</dd></div>
               <div className="metric"><dt>{t('ecl_obsc')}</dt><dd className="num">{(sv.obscuration * 100).toFixed(1)}%</dd></div>
               <div className="metric"><dt>{t('ecl_sun_alt')}</dt><dd className="num">{sv.sunAlt.toFixed(1)}°</dd></div>
-              {ev.gamma !== undefined && (
-                <div className="metric"><dt>{t('ecl_gamma')}</dt><dd className="num">{ev.gamma.toFixed(3)}</dd></div>
-              )}
             </>
           )}
           {lv && (
             <>
-              <div className="metric"><dt>{t('ecl_mag_umbral')}</dt><dd className="num">{lv.umbralMag.toFixed(3)}</dd></div>
-              <div className="metric"><dt>{t('ecl_mag_penum')}</dt><dd className="num">{lv.penumbralMag.toFixed(3)}</dd></div>
-              <div className="metric"><dt>{t('ecl_greatest')}</dt><dd className="num">{fmtClock(ev.time)}</dd></div>
+              <div className="metric"><dt>{t('ecl_mag_lunar')}</dt><dd className="num">{Math.max(0, lv.magnitude).toFixed(3)}</dd></div>
+              <div className="metric"><dt>{t('ecl_mag_dim')}</dt><dd className="num">{Math.max(0, lv.dimMagnitude).toFixed(3)}</dd></div>
             </>
           )}
         </dl>
       </div>
 
       {solar && (
-        <p className="ecl-status" data-ok={visible}>
-          {visible ? t('ecl_visible') : local && local.view.sunAlt <= 0 ? t('ecl_below') : t('ecl_not_visible')}
+        <p className="ecl-status" data-ok={!!local?.visible}>
+          {!local ? t('ecl_not_visible') : local.visible ? t('ecl_visible') : t('ecl_below')}
         </p>
+      )}
+
+      {hasUmbral && (
+        <div className="section">
+          <div className="section-title">{t('look_title')}</div>
+          <div className="look-row" role="radiogroup" aria-label={t('look_title')}>
+            {ECLIPSE_LOOKS.map((l) => (
+              <button
+                key={l.id}
+                role="radio"
+                aria-checked={l.id === look.id}
+                className="look-chip"
+                data-selected={l.id === look.id}
+                onClick={() => setLookId(l.id)}
+                title={t(`look_${l.id}` as TKey)}
+              >
+                <span className="look-dot" style={{ background: l.swatch }} />
+                <span>{t(`look_${l.id}` as TKey)}</span>
+              </button>
+            ))}
+          </div>
+          <p className="muted small">{t('look_note')}</p>
+        </div>
       )}
 
       <div className="ecl-timeline">
@@ -219,9 +231,29 @@ export function EclipseSimulator({
         </div>
       </div>
 
+      {contacts.length > 0 && (
+        <div className="section">
+          <div className="section-title">{t('contacts_title')}</div>
+          <ul className="event-list">
+            {contacts.map((c) => (
+              <li key={c.key}>
+                <button className="event-row event-select" onClick={() => jumpTo(c)} data-selected={Math.abs(c.time.getTime() - when.getTime()) < MIN}>
+                  <span className="event-main">
+                    <span className="event-title">{contactLabel(c)}</span>
+                    <span className="event-sub num">
+                      {sameDay(c.time) ? '' : `${fmtDateLong(c.time, locale.date)} · `}{fmtClock(c.time, hour12)}
+                      {c.altitude !== undefined ? ` · ${c.altitude.toFixed(0)}°` : ''}
+                    </span>
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       <button className="btn-wide" onClick={() => onGoTo(when)}>{t('ecl_goto')}</button>
       <p className="muted small">{t(solar ? 'ecl_note_solar' : 'ecl_note_lunar')}</p>
-      <p className="muted small">{t('ecl_accuracy')}</p>
     </div>
   );
 }

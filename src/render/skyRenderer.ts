@@ -56,6 +56,8 @@ export interface RenderInput {
   timeZoneKind?: 'nominal' | 'legal';
   /** الكسوف/الخسوف المختار من لوحة الكسوف: يُرسم مساره الكامل على الأرض (انظر render/eclipseOverlay.ts) */
   eclipseFocus?: EclipseFocus | null;
+  /** مؤشر النشاط المغناطيسي Kp (0..9) لبيضة الشفق القطبي على القبة */
+  auroraKp?: number;
 }
 
 export interface HitTarget {
@@ -107,7 +109,7 @@ export function renderSky(
 ): RenderOutput {
   const {
     date, observer, zoomScale, layers, selectedZodiacs, selectedMansionIndices, selectedGroupIds, highlightedStarId = null,
-    sceneRotationDeg = 0, panX = 0, panY = 0, timeZoneKind = 'nominal', eclipseFocus = null,
+    sceneRotationDeg = 0, panX = 0, panY = 0, timeZoneKind = 'nominal', eclipseFocus = null, auroraKp = 4,
   } = input;
   const time = Astronomy.MakeTime(date);
   const gmstDeg = getGMSTDeg(time);
@@ -233,6 +235,7 @@ export function renderSky(
         observer, date, gmstDeg, obliquityDeg, sun, moon, planets,
         selectedZodiacs, selectedMansionIndices, selectedGroupIds, highlightedStarId,
         pxPerDeg, angularBoost: ANGULAR_SIZE_VISUAL_BOOST,
+        showAurora: layers.aurora, auroraKp,
         showStars: layers.stars, showPlanets: layers.planets,
         showEcliptic: layers.ecliptic, showMansionNames: layers.mansions && layers.labels, labels: layers.labels,
       },

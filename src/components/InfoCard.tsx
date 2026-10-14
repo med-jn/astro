@@ -7,7 +7,9 @@ import { getGroupById, getGroupAliases, getGroupMembers } from '../core/starGrou
 import { fmtDeg, hoursToHMS, useI18n, type TKey } from '../i18n';
 import { mansionName } from '../i18n/names';
 import { lunarState, norm360, phaseIndex } from '../core/lunar';
-import { MoonDisc, MoonSimulator } from './MoonSimulator';
+import { MoonDisc } from './MoonCanvas';
+import { MoonSimulator } from './MoonSimulator';
+import { useSettings } from '../settings';
 import { EclipseSimulator } from './EclipseSimulator';
 
 interface Props {
@@ -18,6 +20,7 @@ type Tab = 'moon' | 'eclipse' | 'data';
 
 export function InfoCard({ output }: Props) {
   const { t, lang } = useI18n();
+  const { showInfoCard } = useSettings();
   const selectedGroupIds = useSimulationStore((s) => s.selectedGroupIds);
   const date = useSimulationStore((s) => s.date);
   const observer = useSimulationStore((s) => s.observer);
@@ -38,7 +41,7 @@ export function InfoCard({ output }: Props) {
     [sunLon, moonLon, date],
   );
 
-  if (!output) return null;
+  if (!output || !showInfoCard) return null;
 
   const illumPct = Math.round((output.moon.phaseFraction ?? 0) * 100);
   const pIdx = phaseIndex(elongation);
@@ -142,7 +145,7 @@ export function InfoCard({ output }: Props) {
 
             <div className="tab-panel" role="tabpanel">
               {tab === 'moon' && (
-                <MoonSimulator date={date} elongation={elongation} latitudeDeg={observer.latitudeDeg} onGoTo={setDate} />
+                <MoonSimulator date={date} elongation={elongation} latitudeDeg={observer.latitudeDeg} longitudeDeg={observer.longitudeDeg} onGoTo={setDate} />
               )}
               {tab === 'eclipse' && (
                 <EclipseSimulator

@@ -82,7 +82,12 @@ export function useI18n() {
 /* ---------- تنسيقات مشتركة ---------- */
 const pad = (n: number) => String(n).padStart(2, '0');
 
-export const fmtClock = (d: Date) => `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+export function fmtClock(d: Date, hour12 = false): string {
+  const h = d.getHours();
+  const hh = hour12 ? h % 12 || 12 : h;
+  const core = `${pad(hh)}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  return hour12 ? `${core} ${h < 12 ? 'AM' : 'PM'}` : core;
+}
 export const fmtClockShort = (d: Date) => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 export const fmtDateLong = (d: Date, locale: string) =>
   new Intl.DateTimeFormat(locale, { year: 'numeric', month: 'short', day: 'numeric' }).format(d);

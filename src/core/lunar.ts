@@ -1,19 +1,16 @@
 /**
- * حسابات القمر والشمس والكسوف/الخسوف — سلاسل مختصرة منخفضة الدقة
- * المرجع: Jean Meeus, "Astronomical Algorithms" (الفصول 25 و40 و47 و49 و54).
- *
- * الدقة التقريبية: موضع القمر ~0.1°، أي توقيت الأطوار والذروة خلال بضع دقائق إلى ~15 دقيقة.
- * مناسبة للعرض والمحاكاة، وليست بديلاً عن جداول ناسا للكسوف (Espenak) في الاستخدام العلمي الدقيق.
- * الملف مستقل تماماً: لا يعتمد على أي ملف آخر في المشروع.
+ * حسابات القمر والشمس والكسوف/الخسوف فوق astronomy-engine (نفس مكتبة مشروعك).
+ * كل الأوقات والمواضع مأخوذة من المكتبة مباشرة: دقة بالثواني القوسية، وأوقات التماس الرسمية.
  */
+import * as A from 'astronomy-engine';
 
 const RAD = Math.PI / 180;
 const DEG = 180 / Math.PI;
+const AU_KM = 149_597_870.7;
 const DAY_MS = 86_400_000;
-const J2000_MS = Date.UTC(2000, 0, 1, 12, 0, 0);
+const MIN_MS = 60_000;
 
 export const SYNODIC_MONTH = 29.530588853;
-const MEAN_ELONG_RATE = 12.190749; // °/يوم (متوسط تباعد القمر عن الشمس)
 
 export const norm360 = (x: number) => ((x % 360) + 360) % 360;
 export const norm180 = (x: number) => {
@@ -24,168 +21,134 @@ const sin = (d: number) => Math.sin(d * RAD);
 const cos = (d: number) => Math.cos(d * RAD);
 
 /* ------------------------------------------------------------------ */
-/*  الحالة اللحظية للشمس والقمر                                          */
+/*  الحالة اللحظية                                                      */
 /* ------------------------------------------------------------------ */
-
 export interface LunarState {
-  sunLon: number;        // الطول الإكليبتيكي للشمس (°)
-  moonLon: number;       // الطول الإكليبتيكي للقمر (°)
-  moonLat: number;       // العرض الإكليبتيكي للقمر (°)
-  elongation: number;    // 0..360 — استطالة القمر شرق الشمس
+  sunLon: number;
+  moonLon: number;
+  moonLat: number;
+  elongation: number;    // 0..360
   moonDistKm: number;
   sunDistAU: number;
-  moonSemiDia: number;   // نصف القطر الزاوي (°)
-  sunSemiDia: number;
-  moonParallax: number;  // اختلاف المنظر الأفقي الاستوائي (°)
-  sunParallax: number;
-  obliquity: number;
+  moonSemiDia: number;   // °
+  sunSemiDia: number;    // °
+  moonParallax: number;  // °
+  sunParallax: number;   // °
 }
 
 export function lunarState(date: Date): LunarState {
-  const T = (date.getTime() - J2000_MS) / DAY_MS / 36525;
-  const Lp = 218.3164477 + 481267.88123421 * T;
-  const D = 297.8501921 + 445267.1114034 * T;
-  const M = 357.5291092 + 35999.0502909 * T;
-  const Mp = 134.9633964 + 477198.8675055 * T;
-  const F = 93.272095 + 483202.0175233 * T;
-  const E = 1 - 0.002516 * T;
-
-  const moonLon = norm360(
-    Lp +
-      6.288774 * sin(Mp) +
-      1.274027 * sin(2 * D - Mp) +
-      0.658314 * sin(2 * D) +
-      0.213618 * sin(2 * Mp) -
-      0.185116 * E * sin(M) -
-      0.114332 * sin(2 * F) +
-      0.058793 * sin(2 * D - 2 * Mp) +
-      0.057066 * E * sin(2 * D - M - Mp) +
-      0.053322 * sin(2 * D + Mp) +
-      0.045758 * E * sin(2 * D - M),
-  );
-
-  const moonLat =
-    5.128122 * sin(F) +
-    0.280602 * sin(Mp + F) +
-    0.277693 * sin(Mp - F) +
-    0.173237 * sin(2 * D - F) +
-    0.055413 * sin(2 * D - Mp + F) +
-    0.046271 * sin(2 * D - Mp - F) +
-    0.032573 * sin(2 * D + F) +
-    0.017198 * sin(2 * Mp + F);
-
-  const moonDistKm =
-    385000.56 -
-    20905.355 * cos(Mp) -
-    3699.111 * cos(2 * D - Mp) -
-    2955.968 * cos(2 * D) -
-    569.925 * cos(2 * Mp) +
-    48.888 * E * cos(M) -
-    3.149 * cos(2 * F) +
-    246.158 * cos(2 * D - 2 * Mp) -
-    152.138 * E * cos(2 * D - M - Mp) -
-    170.733 * cos(2 * D + Mp) -
-    204.586 * E * cos(2 * D - M);
-
-  const L0 = 280.46646 + 36000.76983 * T;
-  const C =
-    (1.914602 - 0.004817 * T) * sin(M) + 0.019993 * sin(2 * M) + 0.000289 * sin(3 * M);
-  const sunLon = norm360(L0 + C);
-  const e = 0.016708634 - 0.000042037 * T;
-  const nu = M + C;
-  const sunDistAU = (1.000001018 * (1 - e * e)) / (1 + e * cos(nu));
-
+  const t = A.MakeTime(date);
+  const m = A.EclipticGeoMoon(t);
+  const s = A.SunPosition(t);
+  const sv = A.GeoVector(A.Body.Sun, t, true);
+  const sunDistAU = Math.hypot(sv.x, sv.y, sv.z);
+  const moonDistKm = m.dist * AU_KM;
   return {
-    sunLon,
-    moonLon,
-    moonLat,
-    elongation: norm360(moonLon - sunLon),
+    sunLon: s.elon,
+    moonLon: m.lon,
+    moonLat: m.lat,
+    elongation: A.MoonPhase(t),
     moonDistKm,
     sunDistAU,
     moonSemiDia: Math.asin(1737.4 / moonDistKm) * DEG,
-    sunSemiDia: 0.266564 / sunDistAU,
+    sunSemiDia: Math.asin(696_000 / (sunDistAU * AU_KM)) * DEG,
     moonParallax: Math.asin(6378.14 / moonDistKm) * DEG,
-    sunParallax: 0.0024428 / sunDistAU,
-    obliquity: 23.439291 - 0.0130042 * T,
+    sunParallax: Math.asin(6378.14 / (sunDistAU * AU_KM)) * DEG,
   };
 }
 
 /* ------------------------------------------------------------------ */
 /*  الأطوار                                                             */
 /* ------------------------------------------------------------------ */
-
 /** 0 محاق · 1 هلال متزايد · 2 تربيع أول · 3 أحدب متزايد · 4 بدر · 5 أحدب متناقص · 6 تربيع أخير · 7 هلال متناقص */
 export function phaseIndex(elongation: number): number {
   return Math.floor(((norm360(elongation) + 22.5) % 360) / 45);
 }
 
-export const illuminationFromElongation = (elong: number) => (1 - cos(elong)) / 2;
-export const moonAgeDays = (elong: number) => (norm360(elong) / 360) * SYNODIC_MONTH;
-
-/** أول لحظة بعد `from` تبلغ فيها الاستطالة `targetDeg` (0 محاق، 90 تربيع أول، 180 بدر، 270 تربيع أخير). */
+/** أول لحظة بعد `from` تبلغ فيها الاستطالة targetDeg (0 محاق، 90 تربيع أول، 180 بدر، 270 تربيع أخير). */
 export function findPhase(from: Date, targetDeg: number): Date {
-  let t =
-    from.getTime() +
-    (norm360(targetDeg - lunarState(from).elongation) / MEAN_ELONG_RATE) * DAY_MS;
-  for (let i = 0; i < 8; i++) {
-    const err = norm180(targetDeg - lunarState(new Date(t)).elongation);
-    t += (err / MEAN_ELONG_RATE) * DAY_MS;
-    if (Math.abs(err) < 1e-4) break;
+  const r = A.SearchMoonPhase(targetDeg, from, 40);
+  return r ? r.date : new Date(from.getTime() + (norm360(targetDeg - A.MoonPhase(A.MakeTime(from))) / 12.19) * DAY_MS);
+}
+
+/** عمر القمر الحقيقي: الأيام منذ آخر محاق. */
+export function moonAgeDays(date: Date): number {
+  let last = A.SearchMoonPhase(0, new Date(date.getTime() - 32 * DAY_MS), 33);
+  for (let i = 0; i < 3 && last; i++) {
+    const nxt = A.SearchMoonPhase(0, new Date(last.date.getTime() + DAY_MS), 33);
+    if (!nxt || nxt.date.getTime() > date.getTime()) break;
+    last = nxt;
   }
-  return new Date(t);
+  return last ? (date.getTime() - last.date.getTime()) / DAY_MS : 0;
 }
 
-/**
- * مسار SVG للجزء المظلم من قرص القمر (نصف قطره R، المركز عند 0,0).
- * للأطوار المتناقصة (mirror=true) يُطبَّق scale(-1,1) على المسار.
- */
-export function terminatorPath(elongation: number, R: number): { d: string; mirror: boolean } {
+/* ------------------------------------------------------------------ */
+/*  أدوات إحداثية                                                       */
+/* ------------------------------------------------------------------ */
+interface Eq { ra: number; dec: number; distAU: number }   // ra بالدرجات
+const eqOf = (body: A.Body, t: A.AstroTime, obs: A.Observer): Eq => {
+  const e = A.Equator(body, t, obs, true, true);
+  return { ra: e.ra * 15, dec: e.dec, distAU: e.dist };
+};
+
+/** الزاوية المتوازية: دوران القرص الظاهر بالنسبة للأفق (0 عند الزوال، 180 لراصد جنوبي ينظر شمالاً). */
+function parallacticAngle(haDeg: number, decDeg: number, latDeg: number): number {
+  return Math.atan2(sin(haDeg), Math.tan(latDeg * RAD) * cos(decDeg) - sin(decDeg) * cos(haDeg)) * DEG;
+}
+/** اتجاه نقطة (ra2,dec2) من نقطة (ra1,dec1): من الشمال نحو الشرق (°). */
+function positionAngle(ra1: number, dec1: number, ra2: number, dec2: number): number {
+  const dA = ra2 - ra1;
+  return norm360(Math.atan2(cos(dec2) * sin(dA), sin(dec2) * cos(dec1) - cos(dec2) * sin(dec1) * cos(dA)) * DEG);
+}
+function angSep(ra1: number, dec1: number, ra2: number, dec2: number): number {
+  const c = sin(dec1) * sin(dec2) + cos(dec1) * cos(dec2) * cos(ra1 - ra2);
+  return Math.acos(Math.max(-1, Math.min(1, c))) * DEG;
+}
+const hourAngle = (t: A.AstroTime, lonDeg: number, raDeg: number) => A.SiderealTime(t) * 15 + lonDeg - raDeg;
+
+/** زاوية قطب القمر الشمالي من الشمال السماوي نحو الشرق (°) — تتضمن التمايل الحقيقي. */
+function lunarPolePA(t: A.AstroTime, moonRa: number, moonDec: number): number {
+  const axis = A.RotationAxis(A.Body.Moon, t);
+  const pole = A.RotateVector(A.Rotation_EQJ_EQD(t), axis.north);
+  const eq = A.EquatorFromVector(pole);
+  return positionAngle(moonRa, moonDec, eq.ra * 15, eq.dec);
+}
+
+/* ------------------------------------------------------------------ */
+/*  مظهر القمر كما يراه الراصد                                          */
+/* ------------------------------------------------------------------ */
+export interface MoonAppearance {
+  sepDeg: number;       // البعد الزاوي بين القمر والشمس (0 محاق … 180 بدر)
+  pa: number;           // اتجاه الشمس من القمر: من الشمال نحو الشرق (°)
+  q: number;            // دوران القرص ليكون سمت الرأس للأعلى (°، مع عقارب الساعة)
+  poleAngle: number;    // اتجاه قطب القمر الشمالي من الشمال السماوي نحو الشرق (°)
+  illumination: number; // 0..1
+}
+
+export function moonAppearance(date: Date, latDeg: number, lonDeg: number): MoonAppearance {
+  const t = A.MakeTime(date);
+  const obs = new A.Observer(latDeg, lonDeg, 0);
+  const moon = eqOf(A.Body.Moon, t, obs);
+  const sun = eqOf(A.Body.Sun, t, obs);
+  return {
+    sepDeg: angSep(moon.ra, moon.dec, sun.ra, sun.dec),
+    pa: positionAngle(moon.ra, moon.dec, sun.ra, sun.dec),
+    q: parallacticAngle(hourAngle(t, lonDeg, moon.ra), moon.dec, latDeg),
+    poleAngle: lunarPolePA(t, moon.ra, moon.dec),
+    illumination: A.Illumination(A.Body.Moon, t).phase_fraction,
+  };
+}
+
+/** مظهر مبسّط من الاستطالة وحدها (للأيقونات وشرائط الأطوار). */
+export function simpleAppearance(elongation: number, southern = false): MoonAppearance {
   const e = norm360(elongation);
-  const waxing = e <= 180;
-  const phi = waxing ? e : 360 - e;
-  const rx = R * Math.cos(phi * RAD);
-  const sweep = rx >= 0 ? 0 : 1;
-  const d = `M 0 ${-R} A ${R} ${R} 0 0 0 0 ${R} A ${Math.abs(rx).toFixed(3)} ${R} 0 0 ${sweep} 0 ${-R} Z`;
-  return { d, mirror: !waxing };
+  const sepDeg = e <= 180 ? e : 360 - e;
+  return { sepDeg, pa: e <= 180 ? 270 : 90, q: southern ? 180 : 0, poleAngle: 0, illumination: (1 - cos(sepDeg)) / 2 };
 }
 
 /* ------------------------------------------------------------------ */
-/*  منظر مرصدي (Topocentric)                                            */
+/*  كسوف الشمس: منظر مرصدي                                              */
 /* ------------------------------------------------------------------ */
-
-function eclToEq(lon: number, lat: number, eps: number) {
-  const ra = norm360(
-    Math.atan2(sin(lon) * cos(eps) - Math.tan(lat * RAD) * sin(eps), cos(lon)) * DEG,
-  );
-  const dec = Math.asin(sin(lat) * cos(eps) + cos(lat) * sin(eps) * sin(lon)) * DEG;
-  return { ra, dec };
-}
-
-function gmstDeg(date: Date): number {
-  const jd = date.getTime() / DAY_MS + 2440587.5;
-  return norm360(280.46061837 + 360.98564736629 * (jd - 2451545.0));
-}
-
-function toTopocentric(
-  eq: { ra: number; dec: number },
-  parallaxDeg: number,
-  gmst: number,
-  latDeg: number,
-  lonDeg: number,
-) {
-  const u = Math.atan(0.99664719 * Math.tan(latDeg * RAD));
-  const rhoSin = 0.99664719 * Math.sin(u);
-  const rhoCos = Math.cos(u);
-  const H = gmst + lonDeg - eq.ra;
-  const sp = sin(parallaxDeg);
-  const dRa = Math.atan2(-rhoCos * sp * sin(H), cos(eq.dec) - rhoCos * sp * cos(H));
-  const dec = Math.atan2((sin(eq.dec) - rhoSin * sp) * Math.cos(dRa), cos(eq.dec) - rhoCos * sp * cos(H)) * DEG;
-  const ra = eq.ra + dRa * DEG;
-  const Hp = H - dRa * DEG;
-  const alt = Math.asin(sin(latDeg) * sin(dec) + cos(latDeg) * cos(dec) * cos(Hp)) * DEG;
-  return { ra, dec, alt };
-}
-
 function overlapArea(r1: number, r2: number, d: number): number {
   if (d >= r1 + r2) return 0;
   if (d <= Math.abs(r1 - r2)) return Math.PI * Math.min(r1, r2) ** 2;
@@ -196,151 +159,186 @@ function overlapArea(r1: number, r2: number, d: number): number {
 }
 
 export interface SolarView {
-  x: number; y: number;      // موضع مركز القمر بالنسبة للشمس (°) — الشمال للأعلى والشرق لليسار
+  x: number; y: number;     // مركز الجزء المظلم بالنسبة لمركز الشمس (°): x يمين = الغرب، y للأسفل = الجنوب
   sep: number;
-  sunR: number; moonR: number;
-  magnitude: number;         // جزء قطر الشمس المحجوب (قد يتجاوز 1 في الكلي)
-  obscuration: number;       // 0..1 جزء مساحة قرص الشمس المحجوب
-  sunAlt: number;            // ارتفاع الشمس عن الأفق (°)
+  sunR: number; darkR: number;
+  magnitude: number;        // جزء قطر الشمس المظلم (قد يتجاوز 1)
+  obscuration: number;      // 0..1 جزء مساحة القرص المظلم
+  sunAlt: number;           // ارتفاع الشمس (°)
+  q: number;                // دوران المنظر ليكون سمت الرأس للأعلى (°)
 }
 
 export function solarViewAt(date: Date, latDeg: number, lonDeg: number): SolarView {
-  const s = lunarState(date);
-  const g = gmstDeg(date);
-  const sun = toTopocentric(eclToEq(s.sunLon, 0, s.obliquity), s.sunParallax, g, latDeg, lonDeg);
-  const moon = toTopocentric(eclToEq(s.moonLon, s.moonLat, s.obliquity), s.moonParallax, g, latDeg, lonDeg);
+  const t = A.MakeTime(date);
+  const obs = new A.Observer(latDeg, lonDeg, 0);
+  const sun = eqOf(A.Body.Sun, t, obs);
+  const moon = eqOf(A.Body.Moon, t, obs);
   const dx = norm180(moon.ra - sun.ra) * cos(sun.dec);
   const dy = moon.dec - sun.dec;
   const sep = Math.hypot(dx, dy);
-  const sunR = s.sunSemiDia;
-  const moonR = s.moonSemiDia;
+  const sunR = Math.asin(696_000 / (sun.distAU * AU_KM)) * DEG;
+  const darkR = Math.asin(1737.4 / (moon.distAU * AU_KM)) * DEG;
+  const hor = A.Horizon(t, obs, sun.ra / 15, sun.dec, 'normal');
   return {
     x: -dx,
     y: -dy,
     sep,
     sunR,
-    moonR,
-    magnitude: Math.max(0, (sunR + moonR - sep) / (2 * sunR)),
-    obscuration: overlapArea(sunR, moonR, sep) / (Math.PI * sunR * sunR),
-    sunAlt: sun.alt,
+    darkR,
+    magnitude: Math.max(0, (sunR + darkR - sep) / (2 * sunR)),
+    obscuration: overlapArea(sunR, darkR, sep) / (Math.PI * sunR * sunR),
+    sunAlt: hor.altitude,
+    q: parallacticAngle(hourAngle(t, lonDeg, sun.ra), sun.dec, latDeg),
   };
 }
 
-/** أقصى حجب عند موقع الراصد قرب لحظة `center` (±4 ساعات). */
-export function solarLocalMax(center: Date, latDeg: number, lonDeg: number) {
-  let best = { t: center.getTime(), v: solarViewAt(center, latDeg, lonDeg) };
-  for (let m = -240; m <= 240; m += 3) {
-    const t = center.getTime() + m * 60_000;
-    const v = solarViewAt(new Date(t), latDeg, lonDeg);
-    if (v.sep < best.v.sep) best = { t, v };
-  }
-  return { time: new Date(best.t), view: best.v };
-}
-
 /* ------------------------------------------------------------------ */
-/*  الخسوف (منظر مركز الأرض — واحد لكل الراصدين)                        */
+/*  خسوف القمر: هندسة الظاهرة كما تُرصد على قرص القمر                    */
 /* ------------------------------------------------------------------ */
-
 export interface LunarView {
-  x: number; y: number;        // موضع القمر بالنسبة لمركز ظل الأرض (°)
+  /** مركز منطقة الإظلام بالنسبة لمركز القمر (بوحدة نصف قطر القمر): x يمين = الغرب، y أعلى = الشمال */
+  cx: number; cy: number;
   sep: number;
   moonR: number;
-  umbraR: number; penumbraR: number;
-  umbralMag: number; penumbralMag: number;
+  coreR: number;      // نصف قطر منطقة الإظلام العميق (°)
+  haloR: number;      // نصف قطر منطقة الخفوت الخفيف (°)
+  magnitude: number;
+  dimMagnitude: number;
 }
 
 export function lunarViewAt(date: Date): LunarView {
-  const s = lunarState(date);
-  const dl = norm180(s.moonLon - (s.sunLon + 180));
-  const sep = Math.hypot(dl, s.moonLat);
-  // نصفا قطر الظل والشبه ظل عند مسافة القمر، مع تكبير 1.02 لغلاف الأرض الجوي (Danjon)
-  const umbraR = 1.02 * (s.moonParallax + s.sunParallax - s.sunSemiDia);
-  const penumbraR = 1.02 * (s.moonParallax + s.sunParallax + s.sunSemiDia);
+  const t = A.MakeTime(date);
+  const mv = A.GeoMoon(t);
+  const sv = A.GeoVector(A.Body.Sun, t, true);
+  const mEq = A.EquatorFromVector(mv);
+  const sEq = A.EquatorFromVector(sv);
+  const mRa = mEq.ra * 15, mDec = mEq.dec;
+  const aRa = norm360(sEq.ra * 15 + 180), aDec = -sEq.dec; // النقطة المقابلة للشمس
+  const sep = angSep(mRa, mDec, aRa, aDec);
+  const east = norm180(mRa - aRa) * cos(mDec); // إزاحة القمر شرق مركز المنطقة
+  const north = mDec - aDec;
+
+  const moonDistKm = mEq.dist * AU_KM;
+  const sunDistKm = sEq.dist * AU_KM;
+  const moonR = Math.asin(1737.4 / moonDistKm) * DEG;
+  const sunSemi = Math.asin(696_000 / sunDistKm) * DEG;
+  const moonPar = Math.asin(6378.14 / moonDistKm) * DEG;
+  const sunPar = Math.asin(6378.14 / sunDistKm) * DEG;
+  const coreR = 1.02 * (moonPar + sunPar - sunSemi);
+  const haloR = 1.02 * (moonPar + sunPar + sunSemi);
   return {
-    x: -dl,
-    y: -s.moonLat,
+    cx: east / moonR,
+    cy: -north / moonR,
     sep,
-    moonR: s.moonSemiDia,
-    umbraR,
-    penumbraR,
-    umbralMag: (umbraR + s.moonSemiDia - sep) / (2 * s.moonSemiDia),
-    penumbralMag: (penumbraR + s.moonSemiDia - sep) / (2 * s.moonSemiDia),
+    moonR,
+    coreR,
+    haloR,
+    magnitude: (coreR + moonR - sep) / (2 * moonR),
+    dimMagnitude: (haloR + moonR - sep) / (2 * moonR),
   };
 }
 
 /* ------------------------------------------------------------------ */
-/*  البحث عن الكسوفات والخسوفات القادمة                                 */
+/*  الأحداث القادمة وأوقات التماس                                       */
 /* ------------------------------------------------------------------ */
-
 export type EclipseKind = 'solar' | 'lunar';
-export type EclipseType = 'total' | 'annular' | 'partial' | 'penumbral';
+export type EclipseType = 'total' | 'annular' | 'partial' | 'faint';
 
 export interface EclipseEvent {
   kind: EclipseKind;
   type: EclipseType;
-  time: Date;          // لحظة الذروة (مركز الأرض)
-  gamma?: number;      // للكسوف: أدنى بعد لمحور الظل عن مركز الأرض (بوحدة نصف قطر الأرض)
-  magnitude: number;   // للخسوف: قدر الظل (أو شبه الظل) · للكسوف: غير مستخدم (0)
+  time: Date;            // لحظة الذروة
+  magnitude: number;
+  /** للخسوف فقط: أنصاف المدد (بالدقائق) حتى بدء كل مرحلة */
+  sdFaint?: number;
+  sdPartial?: number;
+  sdTotal?: number;
 }
 
-function minSeparation(
-  around: Date,
-  sepAt: (d: Date) => number,
-): { t: number; sep: number } {
-  let best = { t: around.getTime(), sep: Infinity };
-  for (let m = -840; m <= 840; m += 20) {
-    const t = around.getTime() + m * 60_000;
-    const sep = sepAt(new Date(t));
-    if (sep < best.sep) best = { t, sep };
-  }
-  // تحسين خطوتين: ±20 دقيقة بخطوة دقيقة
-  const c = best.t;
-  for (let m = -20; m <= 20; m += 1) {
-    const t = c + m * 60_000;
-    const sep = sepAt(new Date(t));
-    if (sep < best.sep) best = { t, sep };
-  }
-  return best;
-}
-
-function evaluateSolar(newMoon: Date): EclipseEvent | null {
-  const geo = (d: Date) => {
-    const s = lunarState(d);
-    return Math.hypot(norm180(s.moonLon - s.sunLon), s.moonLat);
-  };
-  const { t, sep } = minSeparation(newMoon, geo);
-  const s = lunarState(new Date(t));
-  const gamma = sep / s.moonParallax;
-  if (gamma > 1.55) return null;
-  const type: EclipseType =
-    gamma < 0.9972 ? (s.moonSemiDia > s.sunSemiDia ? 'total' : 'annular') : 'partial';
-  return { kind: 'solar', type, time: new Date(t), gamma, magnitude: 0 };
-}
-
-function evaluateLunar(fullMoon: Date): EclipseEvent | null {
-  const { t } = minSeparation(fullMoon, (d) => lunarViewAt(d).sep);
-  const v = lunarViewAt(new Date(t));
-  let type: EclipseType;
-  let magnitude: number;
-  if (v.umbralMag >= 1) { type = 'total'; magnitude = v.umbralMag; }
-  else if (v.umbralMag > 0) { type = 'partial'; magnitude = v.umbralMag; }
-  else if (v.penumbralMag > 0) { type = 'penumbral'; magnitude = v.penumbralMag; }
-  else return null;
-  return { kind: 'lunar', type, time: new Date(t), magnitude };
-}
-
-/** الأحداث القادمة بعد `from` مرتبة زمنياً. */
 export function findEclipses(from: Date, count = 6): EclipseEvent[] {
   const out: EclipseEvent[] = [];
-  let cursor = from;
-  for (let guard = 0; guard < 80 && out.length < count; guard++) {
-    const nm = findPhase(cursor, 0);
-    const fm = findPhase(cursor, 180);
-    const sol = evaluateSolar(nm);
-    const lun = evaluateLunar(fm);
-    if (sol && sol.time.getTime() > from.getTime()) out.push(sol);
-    if (lun && lun.time.getTime() > from.getTime()) out.push(lun);
-    cursor = new Date(Math.max(nm.getTime(), fm.getTime()) + DAY_MS);
+  const t0 = A.MakeTime(from);
+  let l = A.SearchLunarEclipse(t0);
+  let s = A.SearchGlobalSolarEclipse(t0);
+  for (let i = 0; i < count; i++) {
+    out.push({
+      kind: 'lunar',
+      type: l.kind === A.EclipseKind.Penumbral ? 'faint' : l.kind === A.EclipseKind.Partial ? 'partial' : 'total',
+      time: l.peak.date,
+      magnitude: l.obscuration,
+      sdFaint: l.sd_penum,
+      sdPartial: l.sd_partial,
+      sdTotal: l.sd_total,
+    });
+    out.push({
+      kind: 'solar',
+      type: s.kind === A.EclipseKind.Annular ? 'annular' : s.kind === A.EclipseKind.Partial ? 'partial' : 'total',
+      time: s.peak.date,
+      magnitude: 0,
+    });
+    l = A.NextLunarEclipse(l.peak);
+    s = A.NextGlobalSolarEclipse(s.peak);
   }
   return out.sort((a, b) => a.time.getTime() - b.time.getTime()).slice(0, count);
+}
+
+export type ContactKey =
+  | 'faintStart' | 'partialStart' | 'totalStart' | 'max' | 'totalEnd' | 'partialEnd' | 'faintEnd'
+  | 'solStart' | 'solCentralStart' | 'solMax' | 'solCentralEnd' | 'solEnd';
+
+export interface Contact { key: ContactKey; time: Date; altitude?: number }
+
+/** أوقات مراحل الخسوف (واحدة لكل الراصدين) من أنصاف المدد الرسمية. */
+export function lunarContacts(ev: EclipseEvent): Contact[] {
+  const m = ev.time.getTime();
+  const at = (key: ContactKey, min: number): Contact => ({ key, time: new Date(m + min * MIN_MS) });
+  const list: Contact[] = [];
+  if (ev.sdFaint) list.push(at('faintStart', -ev.sdFaint));
+  if (ev.sdPartial) list.push(at('partialStart', -ev.sdPartial));
+  if (ev.sdTotal) list.push(at('totalStart', -ev.sdTotal));
+  list.push(at('max', 0));
+  if (ev.sdTotal) list.push(at('totalEnd', ev.sdTotal));
+  if (ev.sdPartial) list.push(at('partialEnd', ev.sdPartial));
+  if (ev.sdFaint) list.push(at('faintEnd', ev.sdFaint));
+  return list;
+}
+
+export interface SolarLocal {
+  type: EclipseType;
+  obscuration: number;
+  peak: Date;
+  peakAlt: number;
+  visible: boolean;       // الشمس فوق الأفق في لحظة ما أثناء الكسوف
+  contacts: Contact[];
+}
+
+/** تفاصيل الكسوف عند موقع الراصد بأوقات التماس الرسمية، أو null إن لم يُرَ من موقعه أصلاً. */
+export function solarLocalInfo(ev: EclipseEvent, latDeg: number, lonDeg: number): SolarLocal | null {
+  if (ev.kind !== 'solar') return null;
+  const obs = new A.Observer(latDeg, lonDeg, 0);
+  let info: A.LocalSolarEclipseInfo;
+  try {
+    info = A.SearchLocalSolarEclipse(A.MakeTime(new Date(ev.time.getTime() - 3 * DAY_MS)), obs);
+  } catch {
+    return null;
+  }
+  if (Math.abs(info.peak.time.date.getTime() - ev.time.getTime()) > 2 * DAY_MS) return null;
+  const c = (key: ContactKey, e: A.EclipseEvent | undefined): Contact[] =>
+    e ? [{ key, time: e.time.date, altitude: e.altitude }] : [];
+  const contacts = [
+    ...c('solStart', info.partial_begin),
+    ...c('solCentralStart', info.total_begin),
+    ...c('solMax', info.peak),
+    ...c('solCentralEnd', info.total_end),
+    ...c('solEnd', info.partial_end),
+  ];
+  const type: EclipseType = info.kind === A.EclipseKind.Annular ? 'annular' : info.kind === A.EclipseKind.Partial ? 'partial' : 'total';
+  return {
+    type,
+    obscuration: info.obscuration,
+    peak: info.peak.time.date,
+    peakAlt: info.peak.altitude,
+    visible: [info.partial_begin, info.peak, info.partial_end].some((e) => e && e.altitude > 0),
+    contacts,
+  };
 }
