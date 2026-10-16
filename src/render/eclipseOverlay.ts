@@ -1,13 +1,13 @@
 /**
  * طبقة الكسوف والخسوف على خريطة الأرض وخريطة السماء.
  *
- *  - الكسوف الشمسي: الشبه ظل والظل الحقيقيان على سطح الأرض في اللحظة الحالية (مقطع المخروط مع بيضاوية
- *    WGS84 لا دوائر مقرَّبة)، ومع تحديد كسوف في اللوحة: بصمات الشبه ظل المتراكمة (منطقة الكسوف الجزئي)،
+ *  - الكسوف الشمسي: منطقة الكلية/الحلقية ومنطقة الكسوف الجزئي على سطح الأرض في اللحظة الحالية (بإسقاط
+ *    بيضاوية WGS84 لا دوائر مقرَّبة)، ومع تحديد كسوف في اللوحة: مناطق الكسوف الجزئي المتراكمة،
  *    وشريط الكلية/الحلقية بحدّيه وخط وسطه وعلامات كل 10 دقائق.
  *  - الخسوف القمري: منطقة وجود القمر فوق الأفق المنكسر، ومنطقة وجود الشمس، وتقاطعهما (حيث يقع الخسوف الأفقي)،
- *    وظل الأرض وشبه ظلها على قرص القمر في خريطة السماء.
+ *    ومنطقة الإظلام على قرص القمر في خريطة السماء.
  *
- * تُرسم الأسطح في فضاء الشاشة بإسقاط الخريطة نفسه (latLonToScreen) فتبقى متسقة مع الدوران والإزاحة والتكبير.
+ * تُرسم المناطق في فضاء الشاشة بإسقاط الخريطة نفسه (latLonToScreen) فتبقى متسقة مع الدوران والإزاحة والتكبير.
  */
 import type { PolarMapConfig } from '../core/projection';
 import { latLonToScreen, raDecToScreen } from '../core/projection';
@@ -16,6 +16,8 @@ import {
   type LatLon, type Cap, type GroundOutline, type SolarPath, type SolarShadowState,
 } from '../core/eclipses';
 import { fillTextUpright } from './uprightText';
+import { directLight, refractedLight } from './eclipseView';
+import { resolveLook, type EclipseLookValue } from '../core/danjon';
 
 const DEG = Math.PI / 180;
 
@@ -146,23 +148,23 @@ function fillOutline(
   }
 }
 
-function drawSolarShadow(ctx: CanvasRenderingContext2D, config: PolarMapConfig, sh: SolarShadowState, uiScale: number) {
+function drawSolarZones(ctx: CanvasRenderingContext2D, config: PolarMapConfig, sh: SolarShadowState, uiScale: number) {
   const lw = Math.max(1, 1.1 * Math.min(uiScale, 3));
   ctx.save();
   ctx.lineJoin = 'round';
   if (sh.penumbra) {
-    fillOutline(ctx, config, sh.penumbra, sh.nearest, 'rgba(0,0,0,0.26)', 'rgba(255,255,255,0.6)', lw);
+    fillOutline(ctx, config, sh.penumbra, sh.nearest, 'rgba(47,116,240,0.22)', 'rgba(143,186,255,0.9)', lw);
   }
   if (sh.umbra) {
-    fillOutline(ctx, config, sh.umbra, null, 'rgba(0,0,0,0.78)', 'rgba(255,255,255,0.9)', 1);
+    fillOutline(ctx, config, sh.umbra, null, 'rgba(47,116,240,0.62)', 'rgba(255,255,255,0.95)', 1);
   }
-  // على الخريطة العالمية يقلّ الظل عن بكسل: علامة مرئية دائماً (أبيض = كلي، ذهبي = حلقي)
+  // على الخريطة العالمية تقلّ منطقة الكلية عن بكسل: علامة مرئية دائماً (أبيض = كلي، ذهبي = حلقي)
   if (sh.axisHit && Number.isFinite(sh.umbraRadiusKm)) {
     const p = latLonToScreen(sh.axisHit.latDeg, sh.axisHit.lonDeg, config);
     const r = Math.max(2.5, Math.abs(sh.umbraRadiusKm) * pxPerKm(config));
     ctx.beginPath();
     ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(0,0,0,0.85)';
+    ctx.fillStyle = 'rgba(47,116,240,0.9)';
     ctx.fill();
     ctx.strokeStyle = sh.umbraRadiusKm >= 0 ? '#ffffff' : '#f4c26b';
     ctx.lineWidth = 1.3;
@@ -287,7 +289,7 @@ export function drawEclipseGround(
 
   if (sepDeg < 2.6) {
     const sh = solarShadowAt(date);
-    if (sh.active) drawSolarShadow(ctx, config, sh, uiScale);
+    if (sh.active) drawSolarZones(ctx, config, sh, uiScale);
   } else if (180 - sepDeg < 2.4) {
     drawLunarCaps(ctx, config, date, uiScale);
   }
@@ -312,7 +314,7 @@ export function skyAxes(raH: number, decDeg: number, gmstDeg: number, config: Po
  * الإزاحة وأنصاف الأقطار بوحدة نصف قطر القمر من eclipses.lunarShadowOnSky، فيتطابق الشكل مع الواقع بغض النظر
  * عن التكبير البصري لقرص القمر.
  */
-export function drawEarthShadowOnMapMoon(
+export function drawEclipseOnMapMoon(
   ctx: CanvasRenderingContext2D, config: PolarMapConfig, gmstDeg: number, date: Date, sepDeg: number,
   moonRaH: number, moonDecDeg: number, moonP: { x: number; y: number; visible: boolean }, moonRadiusPx: number
 ) {
@@ -324,30 +326,36 @@ export function drawEarthShadowOnMapMoon(
   const cx = moonP.x + R * (s.eastMoonRadii * ax.e.x + s.northMoonRadii * ax.n.x);
   const cy = moonP.y + R * (s.eastMoonRadii * ax.e.y + s.northMoonRadii * ax.n.y);
 
-  paintEarthShadowDisc(ctx, moonP.x, moonP.y, R, cx, cy, s.umbra * R, s.penumbra * R);
+  paintDarkRegion(ctx, moonP.x, moonP.y, R, cx, cy, s.umbra * R, s.penumbra * R, resolveLook(date));
 }
 
-/** يرسم الظل الكامل والشبه ظل (مركزهما cx,cy) مقصوصَين على قرص القمر (mx,my,R). مشترك بين الخريطة والقبة */
-export function paintEarthShadowDisc(
-  ctx: CanvasRenderingContext2D, mx: number, my: number, R: number, cx: number, cy: number, ur: number, pr: number
+/**
+ * يرسم منطقة الإظلام والخفوت (مركزها cx,cy) على قرص القمر (mx,my,R). مشترك بين الخريطة والقبة.
+ * اللون من نموذج الضوء المباشر والمنكسر نفسه المستخدم في المنظر المحلي (eclipseView)، مضروباً (multiply) في سطح القمر،
+ * فيتبع مظهر الخسوف المختار (دانجون أو أحد المظاهر اللونية) تلقائياً في كل موضع يُرسم فيه القمر.
+ */
+export function paintDarkRegion(
+  ctx: CanvasRenderingContext2D, mx: number, my: number, R: number, cx: number, cy: number, ur: number, pr: number,
+  look: EclipseLookValue = resolveLook(new Date())
 ) {
   ctx.save();
   ctx.beginPath();
   ctx.arc(mx, my, R, 0, Math.PI * 2);
   ctx.clip();
-  const pen = ctx.createRadialGradient(cx, cy, Math.max(0, ur * 0.9), cx, cy, pr);
-  pen.addColorStop(0, 'rgba(20,10,6,0.55)');
-  pen.addColorStop(0.55, 'rgba(20,10,6,0.22)');
-  pen.addColorStop(1, 'rgba(20,10,6,0)');
-  ctx.fillStyle = pen;
-  ctx.beginPath(); ctx.arc(cx, cy, pr, 0, Math.PI * 2); ctx.fill();
-  const um = ctx.createRadialGradient(cx, cy, 0, cx, cy, ur);
-  um.addColorStop(0, 'rgba(58,14,8,0.9)');
-  um.addColorStop(0.7, 'rgba(98,26,12,0.86)');
-  um.addColorStop(0.93, 'rgba(150,56,24,0.8)');
-  um.addColorStop(1, 'rgba(176,84,40,0.62)');
-  ctx.fillStyle = um;
-  ctx.beginPath(); ctx.arc(cx, cy, ur, 0, Math.PI * 2); ctx.fill();
+  ctx.globalCompositeOperation = 'multiply';
+  const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, pr);
+  const N = 48;
+  for (let i = 0; i <= N; i++) {
+    const t = i / N, d = t * pr;
+    const f = directLight(d, ur, pr);
+    const rl = refractedLight(d, ur, look.L);
+    const c = [0, 1, 2].map((k) => Math.round(255 * Math.pow(Math.min(1, Math.max(0, f + rl[k] * look.tint[k])), 1 / 2.2)));
+    g.addColorStop(t, `rgb(${c[0]},${c[1]},${c[2]})`);
+  }
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(cx, cy, pr, 0, Math.PI * 2);
+  ctx.fill();
   ctx.restore();
 }
 

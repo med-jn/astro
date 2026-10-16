@@ -1,0 +1,70 @@
+import { describe, expect, it } from 'vitest';
+import { ar } from '../src/i18n/ar';
+import { en } from '../src/i18n/en';
+import { LOOKS } from '../src/core/danjon';
+import { CITIES } from '../src/i18n/names';
+import { read, sourceFiles, stripComments, SRC } from './helpers';
+import { join } from 'node:path';
+
+const arKeys = Object.keys(ar);
+const enKeys = Object.keys(en);
+const placeholders = (s: string) => [...s.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort().join(',');
+
+describe('مفاتيح الترجمة', () => {
+  it('العربية والإنجليزية بالمفاتيح نفسها', () => {
+    expect(arKeys.filter((k) => !(k in en))).toEqual([]);
+    expect(enKeys.filter((k) => !(k in ar))).toEqual([]);
+  });
+
+  it('لا قيم فارغة ولا مسافات زائدة', () => {
+    for (const [name, d] of [['ar', ar], ['en', en]] as const) {
+      for (const [k, v] of Object.entries(d)) {
+        expect(v.trim().length, `${name}.${k} فارغ`).toBeGreaterThan(0);
+        expect(v, `${name}.${k} فيه مسافات زائدة`).toBe(v.trim());
+      }
+    }
+  });
+
+  it('المتغيّرات {x} متطابقة بين اللغتين', () => {
+    for (const k of arKeys) {
+      expect(placeholders((en as Record<string, string>)[k]), `المتغيّرات في ${k}`).toBe(placeholders((ar as Record<string, string>)[k]));
+    }
+  });
+
+  it('النص الإنجليزي ليس منسوخاً من العربي، والعربي يحوي حروفاً عربية', () => {
+    for (const k of arKeys) {
+      const a = (ar as Record<string, string>)[k], e = (en as Record<string, string>)[k];
+      if (k === 'set_lang_en' || k === 'set_lang_ar') continue;
+      expect(/[\u0600-\u06FF]/.test(e), `en.${k} يحوي حروفاً عربية`).toBe(false);
+      if (/[A-Za-z]{3,}/.test(a)) continue; // نصوص مثل L0 أو ids مقصودة
+      expect(/[\u0600-\u06FF]/.test(a), `ar.${k} بلا حروف عربية`).toBe(true);
+    }
+  });
+
+  it('كل مفتاح يُستعمل في الكود موجود في القاموس', () => {
+    const missing: string[] = [];
+    for (const f of sourceFiles(SRC)) {
+      if (f.includes(`${join('src', 'i18n')}`)) continue;
+      const s = stripComments(read(f));
+      for (const m of s.matchAll(/\bt\(\s*'([a-zA-Z0-9_]+)'/g)) if (!(m[1] in ar)) missing.push(`${f}: ${m[1]}`);
+    }
+    expect(missing).toEqual([]);
+  });
+
+  it('عائلات المفاتيح الديناميكية مكتملة', () => {
+    const need = (prefix: string, ids: (string | number)[]) =>
+      ids.forEach((id) => expect(`${prefix}${id}` in ar, `ناقص ${prefix}${id}`).toBe(true));
+    need('phase_', [0, 1, 2, 3, 4, 5, 6, 7]);
+    need('look_', ['auto', ...LOOKS.map((l) => l.id)]);
+    need('ev_phase_', ['penumbral', 'partial', 'total', 'annular']);
+    need('ecl_', ['total', 'annular', 'partial', 'faint']);
+    need('season_', ['spring', 'summer', 'autumn', 'winter']);
+    need('tab_', ['moon', 'eclipse', 'data']);
+    need('', CITIES.map((c) => c.id));
+    const store = read(join(SRC, 'state', 'store.ts'));
+    const block = store.match(/interface LayerToggles \{([^}]*)\}/)?.[1] ?? '';
+    const layers = [...block.matchAll(/^\s*(\w+)\s*:/gm)].map((m) => m[1]);
+    expect(layers.length).toBeGreaterThan(5);
+    need('layer_', layers);
+  });
+});

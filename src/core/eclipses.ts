@@ -794,6 +794,8 @@ export interface LunarView {
   bodyToScreen: number[][];
   subObserver: { latDeg: number; lonDeg: number };
   flatten: number;
+  /** اتجاه الشمس من القمر بإطار الشاشة (x يميناً، y نحو السمت، z نحو الراصد) — لإضاءة الطور */
+  sunDir: [number, number, number];
 }
 
 function matMul(a: number[][], b: number[][]): number[][] {
@@ -836,6 +838,9 @@ export function lunarViewAt(date: Date, observer: ObserverLike): LunarView {
   }
   const o = { x: R[0][0] * back.x + R[0][1] * back.y + R[0][2] * back.z, y: R[1][0] * back.x + R[1][1] * back.y + R[1][2] * back.z, z: R[2][0] * back.x + R[2][1] * back.y + R[2][2] * back.z };
 
+  const toSun = norm(sub(mul(S.eqj, S.distKm), mul(M.eqj, M.distKm)));
+  const sunDir: [number, number, number] = [dot(toSun, r), dot(toSun, u), dot(toSun, back)];
+
   const phase: LunarView['phase'] = sh.umbralMagnitude >= 1 ? 'total'
     : sh.umbralMagnitude > 0 ? 'partial' : sh.penumbralMagnitude > 0 ? 'penumbral' : 'none';
 
@@ -846,6 +851,7 @@ export function lunarViewAt(date: Date, observer: ObserverLike): LunarView {
     bodyToScreen,
     subObserver: { latDeg: Math.asin(o.z) / DEG, lonDeg: Math.atan2(o.y, o.x) / DEG },
     flatten: refractionScale(M.altDeg),
+    sunDir,
   };
 }
 

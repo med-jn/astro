@@ -32,7 +32,7 @@ import { drawNightShadingSmooth } from './nightShade';
 import { drawObserverDome, type DomeTarget } from './observerDome';
 import { fillTextUpright, labelGap, setSceneRotationRad } from './uprightText';
 import { getContent, getContentId } from '../core/contentRegistry';
-import { drawEclipseGround, drawEarthShadowOnMapMoon, angSepDeg, moonTextureOrientation, type EclipseFocus } from './eclipseOverlay';
+import { drawEclipseGround, drawEclipseOnMapMoon, angSepDeg, moonTextureOrientation, type EclipseFocus } from './eclipseOverlay';
 import { getMoonImage, MOON_IMAGE_ROTATION_CCW_DEG } from './bodyImages';
 import { moonPoleAngleDeg } from '../core/eclipses';
 
@@ -216,7 +216,7 @@ export function renderSky(
   const realOverlap = sunMoonSepDeg < 0.62;
   const paintMoon = () => {
     drawMoon(ctx, moon, moonScreenP, sunScreenP, moonRadiusPx, moonTex, haloScale, realOverlap);
-    drawEarthShadowOnMapMoon(
+    drawEclipseOnMapMoon(
       ctx, config, gmstDeg, date, sunMoonSepDeg,
       moon.equatorial.rightAscensionHours, moon.equatorial.declinationDeg, moonScreenP, moonRadiusPx
     );

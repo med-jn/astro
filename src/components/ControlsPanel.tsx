@@ -1,10 +1,12 @@
-import { useEffect, useState, type CSSProperties, type ElementType, type ReactNode } from 'react';
+import { memo, useEffect, useState, type CSSProperties, type ElementType } from 'react';
 import {
   Play, Pause, Clock, MapPinned, LocateFixed, Globe2, Contrast, Orbit, Route, Radar,
-  CircleDot, Star, Disc, Tag, Compass, Sparkles, X, Plus, Minus, RotateCcw, Moon,
-  Grid3x3, Clock3, Telescope, Menu, ChevronRight, ArrowLeft, Settings as SettingsIcon, Info,
+  CircleDot, Star, Disc, Tag, Compass, Sparkles, X, RotateCcw, Moon,
+  Grid3x3, Clock3, Telescope, Menu, Settings as SettingsIcon, Info,
 } from 'lucide-react';
+import { useShallow } from 'zustand/react/shallow';
 import { SPEED_LABELS_AR, useSimulationStore, type LayerToggles } from '../state/store';
+import { useSimDate } from '../hooks';
 import { ZODIAC_ORDER, type ZodiacKey } from '../core/zodiac';
 import { getZodiacNameAr } from '../core/zodiacNamesAr';
 import { getAllLunarMansions } from '../core/mansions';
@@ -13,6 +15,8 @@ import { fmtClock, fmtDateLong, monthName, toInputValue, useI18n, type TKey } fr
 import { CITIES, mansionName, zodiacName } from '../i18n/names';
 import { formatCoord, resetSettings, updateSettings, useSettings } from '../settings';
 import { StarSearchBar } from './StarSearchBar';
+import { Flyout, Segmented, Section, NavRow, SwitchRow, StepperRow, CoordField } from './ui';
+import { LookPicker } from './EclipseLiveView';
 import { EclipsePanel } from './EclipsePanel';
 
 /* ------------------------------------------------------------------ */
@@ -48,129 +52,10 @@ function addToDateField(date: Date, field: DateField, delta: number): Date {
 /* ------------------------------------------------------------------ */
 /*  مكوّنات صغيرة مشتركة                                                */
 /* ------------------------------------------------------------------ */
-/** صفحة تغلّف الشريط الجانبي بالكامل (حاسوب وموبايل)، وزر الرجوع يعيد القائمة السابقة. */
-function Flyout({ icon: Icon, title, onClose, children }: {
-  icon: ElementType; title: string; onClose: () => void; children: ReactNode;
-}) {
-  const { t } = useI18n();
-  return (
-    <div className="popover-panel" role="dialog" aria-label={title}>
-      <div className="popover-header">
-        <button className="popover-back" onClick={onClose} aria-label={t('back')}><ArrowLeft size={18} className="back-ico" /></button>
-        <Icon size={16} />
-        <span className="popover-title-text">{title}</span>
-      </div>
-      <div className="popover-body">{children}</div>
-    </div>
-  );
-}
-
-function Segmented<T extends string>({ value, options, onChange, label }: {
-  value: T; options: { value: T; label: string }[]; onChange: (v: T) => void; label: string;
-}) {
-  return (
-    <div className="calendar-toggle" role="group" aria-label={label}>
-      {options.map((o) => (
-        <button key={o.value} aria-pressed={value === o.value} onClick={() => onChange(o.value)}>{o.label}</button>
-      ))}
-    </div>
-  );
-}
-
-function Section({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <div className="section">
-      <div className="section-title">{title}</div>
-      <div className="section-body">{children}</div>
-    </div>
-  );
-}
-
-function NavRow({ icon: Icon, title, hint, active, badge, switchState, onClick }: {
-  icon: ElementType; title: string; hint?: string; active?: boolean; badge?: boolean;
-  switchState?: boolean; onClick: () => void;
-}) {
-  return (
-    <button
-      className="icon-trigger"
-      data-active={!!active}
-      aria-pressed={switchState}
-      aria-expanded={switchState === undefined ? !!active : undefined}
-      onClick={onClick}
-      title={title}
-    >
-      <Icon size={18} />
-      <span className="nav-text">
-        <span className="icon-caption">{title}</span>
-        {hint && <span className="nav-hint">{hint}</span>}
-      </span>
-      {badge && <span className="badge-dot" />}
-      {switchState === undefined ? <ChevronRight size={14} className="nav-chev" /> : <span className="switch" data-on={switchState} aria-hidden />}
-    </button>
-  );
-}
-
-function SwitchRow({ icon: Icon, label, checked, onChange }: {
-  icon: ElementType; label: string; checked: boolean; onChange: () => void;
-}) {
-  return (
-    <button className="switch-row" role="switch" aria-checked={checked} onClick={onChange}>
-      <Icon size={16} />
-      <span className="switch-label">{label}</span>
-      <span className="switch" data-on={checked} aria-hidden />
-    </button>
-  );
-}
-
-function StepperRow({ label, value, onDec, onInc }: { label: string; value: string; onDec: () => void; onInc: () => void }) {
-  const { t } = useI18n();
-  return (
-    <div className="stepper-row">
-      <span className="stepper-label">{label}</span>
-      <div className="stepper-controls">
-        <button className="stepper-btn" onClick={onDec} aria-label={t('dec', { label })}><Minus size={14} /></button>
-        <span className="stepper-value num">{value}</span>
-        <button className="stepper-btn" onClick={onInc} aria-label={t('inc', { label })}><Plus size={14} /></button>
-      </div>
-    </div>
-  );
-}
-
-function CoordField({ label, value, min, max, pos, neg, onCommit }: {
-  label: string; value: number; min: number; max: number; pos: string; neg: string; onCommit: (n: number) => void;
-}) {
-  const { coordFormat } = useSettings();
-  const [draft, setDraft] = useState<string | null>(null);
-  const rounded = String(Number(value.toFixed(4)));
-  const parsed = draft === null ? value : Number(draft.replace(',', '.'));
-  const invalid = draft !== null && (draft.trim() === '' || !Number.isFinite(parsed) || parsed < min || parsed > max);
-  return (
-    <label className="field">
-      <span className="field-label">{label}</span>
-      <input
-        type="text"
-        inputMode="decimal"
-        className="coord-input"
-        value={draft ?? rounded}
-        data-invalid={invalid}
-        aria-invalid={invalid}
-        onFocus={() => setDraft(rounded)}
-        onBlur={() => setDraft(null)}
-        onChange={(e) => {
-          setDraft(e.target.value);
-          const n = Number(e.target.value.replace(',', '.'));
-          if (e.target.value.trim() !== '' && Number.isFinite(n) && n >= min && n <= max) onCommit(n);
-        }}
-      />
-      <span className="field-hint num">{formatCoord(value, pos, neg, coordFormat)}</span>
-    </label>
-  );
-}
-
 /* ------------------------------------------------------------------ */
 /*  اللوحة                                                              */
 /* ------------------------------------------------------------------ */
-export function ControlsPanel() {
+function ControlsPanelImpl() {
   const { t, lang, locale, setLang, speedLabel } = useI18n();
   const settings = useSettings();
   const [openPopover, setOpenPopover] = useState<PopoverKey>(null);
@@ -179,13 +64,13 @@ export function ControlsPanel() {
   const [geoStatus, setGeoStatus] = useState<'idle' | 'busy' | 'failed'>('idle');
   const [mansionFilter, setMansionFilter] = useState('');
 
+  const date = useSimDate(200);
+  const cur = () => useSimulationStore.getState().date;
   const {
-    date, isPlaying, speedIndex, observer, layers, timeZoneKind,
-    selectedZodiacs, selectedMansionIndices,
-    setDate, togglePlay, resetToNow, setSpeedIndex, setObserver, toggleLayer,
-    toggleZodiacSelection, clearZodiacSelection, toggleMansionSelection, clearMansionSelection,
-    setTimeZoneKind, auroraKp, setAuroraKp,
-  } = useSimulationStore();
+    isPlaying, speedIndex, observer, layers, timeZoneKind, selectedZodiacs, selectedMansionIndices, setDate, togglePlay, resetToNow, setSpeedIndex, setObserver, toggleLayer, toggleZodiacSelection, clearZodiacSelection, toggleMansionSelection, clearMansionSelection, setTimeZoneKind, auroraKp, setAuroraKp,
+  } = useSimulationStore(
+    useShallow((s) => ({ isPlaying: s.isPlaying, speedIndex: s.speedIndex, observer: s.observer, layers: s.layers, timeZoneKind: s.timeZoneKind, selectedZodiacs: s.selectedZodiacs, selectedMansionIndices: s.selectedMansionIndices, setDate: s.setDate, togglePlay: s.togglePlay, resetToNow: s.resetToNow, setSpeedIndex: s.setSpeedIndex, setObserver: s.setObserver, toggleLayer: s.toggleLayer, toggleZodiacSelection: s.toggleZodiacSelection, clearZodiacSelection: s.clearZodiacSelection, toggleMansionSelection: s.toggleMansionSelection, clearMansionSelection: s.clearMansionSelection, setTimeZoneKind: s.setTimeZoneKind, auroraKp: s.auroraKp, setAuroraKp: s.setAuroraKp })),
+  );
 
   const closeAll = () => { setOpenPopover(null); };
 
@@ -303,30 +188,30 @@ export function ControlsPanel() {
                 {calendarMode === 'gregorian' ? (
                   <>
                     <StepperRow label={t('f_year')} value={String(date.getFullYear())}
-                      onDec={() => setDate(addToDateField(date, 'year', -1))} onInc={() => setDate(addToDateField(date, 'year', 1))} />
+                      onDec={() => setDate(addToDateField(cur(), 'year', -1))} onInc={() => setDate(addToDateField(cur(), 'year', 1))} />
                     <StepperRow label={t('f_month')} value={monthName(date, locale.date)}
-                      onDec={() => setDate(addToDateField(date, 'month', -1))} onInc={() => setDate(addToDateField(date, 'month', 1))} />
+                      onDec={() => setDate(addToDateField(cur(), 'month', -1))} onInc={() => setDate(addToDateField(cur(), 'month', 1))} />
                     <StepperRow label={t('f_day')} value={String(date.getDate())}
-                      onDec={() => setDate(addToDateField(date, 'day', -1))} onInc={() => setDate(addToDateField(date, 'day', 1))} />
+                      onDec={() => setDate(addToDateField(cur(), 'day', -1))} onInc={() => setDate(addToDateField(cur(), 'day', 1))} />
                   </>
                 ) : (
                   <>
                     <div className="hijri-display">{hijriFmt(date)}</div>
                     <StepperRow label={t('f_day')} value={String(date.getDate())}
-                      onDec={() => setDate(addToDateField(date, 'day', -1))} onInc={() => setDate(addToDateField(date, 'day', 1))} />
+                      onDec={() => setDate(addToDateField(cur(), 'day', -1))} onInc={() => setDate(addToDateField(cur(), 'day', 1))} />
                   </>
                 )}
                 <StepperRow label={t('f_hour')} value={String(date.getHours()).padStart(2, '0')}
-                  onDec={() => setDate(addToDateField(date, 'hour', -1))} onInc={() => setDate(addToDateField(date, 'hour', 1))} />
+                  onDec={() => setDate(addToDateField(cur(), 'hour', -1))} onInc={() => setDate(addToDateField(cur(), 'hour', 1))} />
                 <StepperRow label={t('f_minute')} value={String(date.getMinutes()).padStart(2, '0')}
-                  onDec={() => setDate(addToDateField(date, 'minute', -1))} onInc={() => setDate(addToDateField(date, 'minute', 1))} />
+                  onDec={() => setDate(addToDateField(cur(), 'minute', -1))} onInc={() => setDate(addToDateField(cur(), 'minute', 1))} />
 
                 <button className="btn-wide" onClick={resetToNow}><RotateCcw size={16} /> {t('now')}</button>
 
                 <Section title={t('jump_title')}>
                   <div className="chip-row">
                     {JUMP_PHASES.map((deg) => (
-                      <button key={deg} className="chip-btn" onClick={() => setDate(findPhase(date, deg))}>
+                      <button key={deg} className="chip-btn" onClick={() => setDate(findPhase(cur(), deg))}>
                         {t(`phase_${deg / 45}` as TKey)}
                       </button>
                     ))}
@@ -521,6 +406,7 @@ export function ControlsPanel() {
                 <SwitchRow icon={Tag} label={t('set_labels')} checked={layers.labels} onChange={() => toggleLayer('labels')} />
                 <SwitchRow icon={Info} label={t('set_info_card')} checked={settings.showInfoCard} onChange={() => updateSettings({ showInfoCard: !settings.showInfoCard })} />
               </Section>
+              <LookPicker />
               <Section title={t('set_time_format')}>
                 <Segmented<'24' | '12'> label={t('set_time_format')} value={settings.hour12 ? '12' : '24'}
                   onChange={(v) => updateSettings({ hour12: v === '12' })}
@@ -539,3 +425,6 @@ export function ControlsPanel() {
     </>
   );
 }
+
+/** بلا خصائص: يمنع إعادة رسم اللوحة كلما أعاد App رسم نفسه */
+export const ControlsPanel = memo(ControlsPanelImpl);

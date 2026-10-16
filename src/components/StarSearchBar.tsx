@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Search, X } from 'lucide-react';
 import { useSimulationStore } from '../state/store';
+import { useSimDate } from '../hooks';
 import { searchAll, computeCenterPanDelta, type SearchResult } from '../core/starSearch';
 
 /** مستوى تكبير معقول لعرض الهدف بعد التوسيط — لا يُخفَّض إن كان المستخدم مكبِّراً أكثر أصلاً */
@@ -10,7 +11,7 @@ export function StarSearchBar() {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
 
-  const date = useSimulationStore((s) => s.date);
+  const date = useSimDate(500);
   const results: SearchResult[] = useMemo(() => searchAll(query, date), [query, date]);
 
   function selectResult(result: SearchResult) {

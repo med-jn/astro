@@ -496,7 +496,7 @@ function lensArea(a: number, b: number, c: number): number {
  * هندسة دقيقة: من النقطة يُرى قرص الشمس (نصف قطره ρs) وقرص الأرض (ρe) على بُعد زاوي s يتناسب خطياً
  * مع d؛ تُستخرج النسب من نصفي قطر الظل U والشبه ظل P: ρe+ρs ∝ P و ρe−ρs ∝ U.
  */
-function directLight(d: number, U: number, P: number): number {
+export function directLight(d: number, U: number, P: number): number {
   if (d >= P) return 1;
   const re = (P + U) / 2, rs = (P - U) / 2;
   if (rs <= 0) return 1;
@@ -504,12 +504,12 @@ function directLight(d: number, U: number, P: number): number {
 }
 
 /**
- * مقياس دانجون (L0..L4) لسطوع/لون القمر داخل الظل. هو مُدخَل لا تنبؤ: يتوقف على نقاء الغلاف الجوي (الغبار البركاني
- * والسحب عند حافة الأرض) وقت الخسوف ولا يمكن حسابه مسبقاً.
+ * مقياس دانجون (L0..L4) لسطوع القمر ولونه أثناء الخسوف. هو مُدخَل رصدي لا تنبؤ: يختلف من خسوف إلى آخر
+ * ولا يمكن حسابه مسبقاً.
  *   L0 داكن جداً شبه غير مرئي · L1 رمادي/بني · L2 أحمر صدئ (الأشيع) · L3 قرميدي بحافة صفراء · L4 نحاسي ساطع بحافة زرقاء
  */
 export const DANJON_LABELS_AR = [
-  'L0 — داكن جداً (بعد ثوران بركاني)', 'L1 — رمادي بني داكن', 'L2 — أحمر صدئ (النموذجي)',
+  'L0 — داكن جداً', 'L1 — رمادي بني داكن', 'L2 — أحمر صدئ (النموذجي)',
   'L3 — أحمر قرميدي بحافة صفراء', 'L4 — نحاسي ساطع بحافة زرقاء',
 ];
 const DANJON_CORE = [0.006, 0.025, 0.07, 0.14, 0.26];       // سطوع مركز الظل
@@ -524,7 +524,7 @@ function danjonLerp(arr: number[], L: number): number {
 }
 
 /** الضوء المنكسر (أحمر نحاسي) داخل الظل وحوله: أشد سطوعاً عند الحافة وأخفت نحو المركز */
-function refractedLight(d: number, U: number, L: number): [number, number, number] {
+export function refractedLight(d: number, U: number, L: number): [number, number, number] {
   const q = d / Math.max(U, 1e-6);
   const edge = smooth(1.12, 0.78, q);
   const core = danjonLerp(DANJON_CORE, L) + (danjonLerp(DANJON_RIM, L) - danjonLerp(DANJON_CORE, L)) * Math.pow(smooth(0, 1, q), 1.6);
@@ -540,6 +540,14 @@ export interface LunarViewOptions {
   moonRadiusPx?: number;
   /** درجة دانجون (0..4، تقبل الكسور): لون وسطوع القمر داخل الظل. الافتراضي 2 */
   danjonL?: number;
+  /** معاملات ضرب لونية على الضوء المنكسر (لمظاهر لونية أخرى فوق مقياس دانجون) */
+  tint?: [number, number, number];
+  /** قرص القمر وحده بخلفية شفافة: بلا سماء ولا نجوم ولا أفق (لبطاقة المعلومات) */
+  bare?: boolean;
+  /** تطبيق الغلاف الجوي (احمرار قرب الأفق وضغط الانكسار). الافتراضي: يتبع bare معكوساً */
+  atmosphere?: boolean;
+  /** رسم الهالة حول القرص (الافتراضي true) */
+  halo?: boolean;
 }
 
 // ----- نسيج القمر من الصورة (إن وُجدت) -----
@@ -605,33 +613,38 @@ export function drawLunarView(ctx: CanvasRenderingContext2D, w: number, h: numbe
   const tex = currentMoonTex();
   if (!tex && !moonAlbedo) moonAlbedo = buildMoonAlbedo();
   const danjon = opts.danjonL ?? 2;
+  const lookTint = opts.tint ?? [1, 1, 1];
+  const bare = !!opts.bare;
+  const atm = opts.atmosphere ?? !bare;
   const rotA = MOON_IMAGE_ROTATION_CCW_DEG * DEG, cosA = Math.cos(rotA), sinA = Math.sin(rotA);
   const cx = w / 2, cy = h / 2;
   const R = opts.moonRadiusPx ?? Math.min(w, h) * 0.36;
   const scale = R / v.moon.radiusDeg;
-  const flat = v.flatten;
+  const flat = atm ? v.flatten : 1;
   const sunAlt = v.sun.altDeg;
-  const sunDay = smooth(-6, 4, sunAlt);
+  const sunDay = bare ? 0 : smooth(-6, 4, sunAlt);
   const pal = skyPalette(sunAlt, 1);
-  const { tint, bright } = extinction(v.moon.altDeg);
+  const { tint, bright } = atm ? extinction(v.moon.altDeg) : { tint: [1, 1, 1] as RGB, bright: 1 };
 
   ctx.save();
   ctx.clearRect(0, 0, w, h);
 
   // ----- السماء (ليل، أو نهار/غسق إن كانت الشمس فوق الأفق كما في الخسوف الأفقي) -----
   const horizonY = cy + v.moon.altDeg * scale;
-  const hasHorizon = horizonY > -40 && horizonY < h + 40;
+  const hasHorizon = !bare && horizonY > -40 && horizonY < h + 40;
   const night: RGB = [3, 5, 12];
   const zen = mix(night, pal.zenith, sunDay);
   const hor = mix(night, pal.horizon, sunDay);
-  const g = ctx.createLinearGradient(0, 0, 0, h);
-  g.addColorStop(0, css(zen));
-  g.addColorStop(1, css(mix(zen, hor, hasHorizon ? 0.9 : 0.35)));
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, w, h);
+  if (!bare) {
+    const g = ctx.createLinearGradient(0, 0, 0, h);
+    g.addColorStop(0, css(zen));
+    g.addColorStop(1, css(mix(zen, hor, hasHorizon ? 0.9 : 0.35)));
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, w, h);
+  }
 
   // نجوم خافتة تتلاشى مع النهار (مواضع ثابتة)
-  if (sunDay < 0.9) {
+  if (!bare && sunDay < 0.9) {
     ctx.fillStyle = `rgba(255,255,255,${0.7 * (1 - sunDay)})`;
     for (let i = 0; i < 60; i++) {
       const sx = hash2(i, 77) * w, sy = hash2(i, 91) * h;
@@ -649,6 +662,7 @@ export function drawLunarView(ctx: CanvasRenderingContext2D, w: number, h: numbe
   const data = img.data;
   const M = v.bodyToScreen;
   const sh = v.shadow;
+  const sd = v.sunDir;
   const half = size / 2;
   const skyVeil = 0.55 * sunDay; // ضوء السماء النهارية يخفّض تباين القمر
   const veilC = mix(zen, hor, 0.6);
@@ -680,14 +694,19 @@ export function drawLunarView(ctx: CanvasRenderingContext2D, w: number, h: numbe
       }
       const L0 = Math.pow(clamp(base, 0, 1.2), 2.2) * (0.86 + 0.14 * Math.sqrt(z));
 
+      // إضاءة الطور (Lommel–Seeliger): تتساوى مع 1 عند البدر فلا تغيّر مظهر الخسوف، وتتدرج ناعمة عند حد الطور
+      const mu0 = x * sd[0] + y * sd[1] + z * sd[2];
+      const lit = mu0 > 0 ? Math.min(1, (2.6 * mu0) / (mu0 + z + 1e-4)) : 0;
+      const earth = 0.025 * (1 - lit);
+
       // ظل الأرض
       const d = Math.hypot(x - sh.dx, y - sh.dy);
       const f = directLight(d, sh.umbra, sh.penumbra);
       const rl = refractedLight(d, sh.umbra, danjon);
-      lightSum += f + 0.35 * rl[0]; lightN++;
-      let r = Math.pow(Math.max(0, L0 * (f + rl[0])), invGamma) * 255;
-      let gC = Math.pow(Math.max(0, L0 * (f + rl[1])), invGamma) * 255;
-      let b = Math.pow(Math.max(0, L0 * (f + rl[2])), invGamma) * 255;
+      lightSum += lit * (f + 0.35 * rl[0]); lightN++;
+      let r = Math.pow(Math.max(0, L0 * (lit * (f + rl[0] * lookTint[0]) + earth)), invGamma) * 255;
+      let gC = Math.pow(Math.max(0, L0 * (lit * (f + rl[1] * lookTint[1]) + earth)), invGamma) * 255;
+      let b = Math.pow(Math.max(0, L0 * (lit * (f + rl[2] * lookTint[2]) + earth)), invGamma) * 255;
       // لون قمر دافئ قليلاً + إخماد جوي قرب الأفق
       r *= 1.0 * tint[0]; gC *= 0.985 * tint[1]; b *= 0.93 * tint[2];
       const k = clamp(bright * 1.05, 0, 1);
@@ -708,17 +727,19 @@ export function drawLunarView(ctx: CanvasRenderingContext2D, w: number, h: numbe
   {
     const lightFrac = lightN ? clamp(lightSum / lightN, 0, 1) : 1;
     const h = Math.pow(lightFrac, 1.4) * (1 - 0.85 * sunDay) * clamp(bright + 0.1, 0, 1);
-    if (h > 0.01) {
+    if (opts.halo !== false && h > 0.01) {
       ctx.save();
       ctx.translate(cx, cy);
       ctx.scale(1, flat);
-      const hg = ctx.createRadialGradient(0, 0, R * 0.9, 0, 0, R * 3.4);
+      // نصف قطر الهالة لا يتجاوز نصف الإطار كي لا تُقصّ بحافة مستقيمة
+      const haloOuter = Math.min(R * 3.4, Math.min(w, h) / 2 / Math.max(flat, 0.5));
+      const hg = ctx.createRadialGradient(0, 0, R * 0.9, 0, 0, haloOuter);
       hg.addColorStop(0, css(mix([255, 255, 255], [255, 240, 215], 1 - bright), 0.5 * h));
       hg.addColorStop(0.18, css([235, 240, 255], 0.2 * h));
       hg.addColorStop(0.5, css([210, 222, 255], 0.06 * h));
       hg.addColorStop(1, css([200, 215, 255], 0));
       ctx.fillStyle = hg;
-      ctx.beginPath(); ctx.arc(0, 0, R * 3.4, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(0, 0, haloOuter, 0, Math.PI * 2); ctx.fill();
       ctx.restore();
     }
   }

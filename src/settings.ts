@@ -4,9 +4,11 @@ export interface Settings {
   hour12: boolean;
   coordFormat: 'decimal' | 'dms';
   showInfoCard: boolean;
+  /** مظهر القمر أثناء الخسوف: 'auto' أو معرّف أحد المظاهر في core/danjon.ts */
+  eclipseLook: string;
 }
 
-export const DEFAULT_SETTINGS: Settings = { hour12: false, coordFormat: 'decimal', showInfoCard: true };
+export const DEFAULT_SETTINGS: Settings = { hour12: false, coordFormat: 'decimal', showInfoCard: true, eclipseLook: 'auto' };
 const KEY = 'astro.settings';
 
 function load(): Settings {
@@ -31,6 +33,8 @@ export function updateSettings(patch: Partial<Settings>) {
   }
   listeners.forEach((l) => l());
 }
+/** قراءة فورية خارج React (للرسم على الكانفاس) */
+export const getSettings = (): Settings => current;
 export const resetSettings = () => updateSettings(DEFAULT_SETTINGS);
 
 const subscribe = (cb: () => void) => {

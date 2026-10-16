@@ -1,14 +1,17 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { Moon, X, Play, MapPin, Crosshair } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { Moon, Play, MapPin, Crosshair } from 'lucide-react';
 import { useSimulationStore } from '../state/store';
 import {
   findEclipsesBetween, eclipseTitleAr, localSolarCircumstances, localLunarCircumstances,
-  solarViewAt, lunarViewAt, lunarEclipseTags,
+  lunarEclipseTags,
   type EclipseEvent, type SolarEclipseEvent, type LunarEclipseEvent,
   type LocalSolarCircumstances, type LocalLunarCircumstances,
 } from '../core/eclipses';
-import { drawSolarView, drawLunarView, drawHorizonStrip, setMoonTexture, DANJON_LABELS_AR } from '../render/eclipseView';
-import { getMoonImage, onBodyImageReady } from '../render/bodyImages';
+import { jumpTo, playFrom } from '../state/jump';
+import { useSimDate } from '../hooks';
+import { Flyout, NavRow } from './ui';
+import { LiveView } from './EclipseLiveView';
+import { sarosSeries } from '../core/saros';
 
 const LUNAR_PHASE_AR: Record<string, string> = {
   P1: 'بداية الخسوف الهامشي (P1)', U1: 'بداية الخسوف الجزئي (U1)', U2: 'بداية الخسوف الكلي (U2)', MAX: 'أعظم خسوف',
@@ -25,100 +28,10 @@ function fmtTime(d: Date, withSeconds = false): string {
   return d.toLocaleTimeString('ar', { hour: '2-digit', minute: '2-digit', ...(withSeconds ? { second: '2-digit' } : {}) });
 }
 
-/** يوقف الزمن ويقفز إلى لحظة معيّنة */
-function jumpTo(date: Date) {
-  useSimulationStore.setState({ date, isPlaying: false, customTimeRateDegPerSec: null });
-}
-
-/** يشغّل المحاكاة بسرعة دقيقة لكل ثانية انطلاقاً من لحظة معيّنة */
-function playFrom(date: Date) {
-  useSimulationStore.setState({ date, isPlaying: true, speedIndex: 1, customTimeRateDegPerSec: null });
-}
-
 interface Row {
   event: EclipseEvent;
   solar?: LocalSolarCircumstances | null;
   lunar?: LocalLunarCircumstances;
-}
-
-// ============================= المنظر المحلي الحي =============================
-
-function LiveView({ event }: { event: EclipseEvent }) {
-  const date = useSimulationStore((s) => s.date);
-  const observer = useSimulationStore((s) => s.observer);
-  const ref = useRef<HTMLCanvasElement>(null);
-  const stripRef = useRef<HTMLCanvasElement>(null);
-  const W = 300, H = 240, SH = 84;
-  const [note, setNote] = useState('');
-  const [danjon, setDanjon] = useState(2);
-  const [imgTick, setImgTick] = useState(0);
-
-  // صورة القمر: تُطلب عند فتح المنظر وتُعاد الرسم عند اكتمال التحميل
-  useEffect(() => {
-    const apply = () => { const im = getMoonImage(); if (im) { setMoonTexture(im); setImgTick((t) => t + 1); } };
-    apply();
-    return onBodyImageReady(apply);
-  }, []);
-
-  useEffect(() => {
-    const cv = ref.current;
-    if (!cv) return;
-    const dpr = window.devicePixelRatio || 1;
-    cv.width = W * dpr; cv.height = H * dpr;
-    const ctx = cv.getContext('2d')!;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    const obs = { latitudeDeg: observer.latitudeDeg, longitudeDeg: observer.longitudeDeg, elevationM: (observer as { elevationM?: number }).elevationM };
-
-    if (event.type === 'solar') {
-      const v = solarViewAt(date, obs);
-      if (v.sun.altDeg < -0.9) {
-        ctx.fillStyle = '#05070c'; ctx.fillRect(0, 0, W, H);
-        setNote('الشمس تحت الأفق في موقعك الآن');
-      } else {
-        drawSolarView(ctx, W, H, v);
-        const kind = v.phase === 'total' ? 'كلي' : v.phase === 'annular' ? 'حلقي' : v.phase === 'partial' ? 'جزئي' : 'لا كسوف في هذه اللحظة';
-        setNote(`${kind} · تغطية ${(v.obscuration * 100).toFixed(1)}% · القدر ${Math.max(0, v.magnitude).toFixed(3)} · ارتفاع الشمس ${v.sun.altDeg.toFixed(1)}°`);
-      }
-    } else {
-      const v = lunarViewAt(date, obs);
-      if (v.moon.altDeg < -0.9) {
-        ctx.fillStyle = '#05070c'; ctx.fillRect(0, 0, W, H);
-        setNote(`القمر تحت الأفق في موقعك الآن (ارتفاعه ${v.moon.altDeg.toFixed(1)}°) — اختر لحظة يكون فيها فوق الأفق`);
-      } else {
-        drawLunarView(ctx, W, H, v, { danjonL: danjon });
-        const both = v.sun.altDeg > -0.9 && v.umbralMagnitude > 0;
-        setNote(
-          `قدر الخسف ${Math.max(0, v.umbralMagnitude).toFixed(3)} · القدر الهامشي ${Math.max(0, v.penumbralMagnitude).toFixed(3)} · ` +
-          `ارتفاع القمر ${v.moon.altDeg.toFixed(1)}°` + (both ? ' · الشمس والقمر فوق الأفق معاً (خسوف أفقي)' : '')
-        );
-      }
-      const sc = stripRef.current;
-      if (sc) {
-        sc.width = W * dpr; sc.height = SH * dpr;
-        const c2 = sc.getContext('2d')!;
-        c2.setTransform(dpr, 0, 0, dpr, 0, 0);
-        drawHorizonStrip(c2, W, SH, { sun: v.sun, moon: v.moon, shadow: v.shadow, umbralMagnitude: v.umbralMagnitude });
-      }
-    }
-  }, [date, observer.latitudeDeg, observer.longitudeDeg, event, danjon, imgTick]);
-
-  return (
-    <div style={{ display: 'grid', gap: 6, justifyItems: 'center' }}>
-      <canvas ref={ref} style={{ width: W, height: H, borderRadius: 8, border: '1px solid rgba(226,232,240,0.15)' }} />
-      {event.type === 'lunar' && (
-        <canvas ref={stripRef} style={{ width: W, height: SH, borderRadius: 8, border: '1px solid rgba(226,232,240,0.15)' }} />
-      )}
-      {event.type === 'lunar' && (
-        <label style={{ fontSize: '0.78em', display: 'flex', gap: 6, alignItems: 'center' }}>
-          لون الخسوف (مقياس دانجون)
-          <select value={danjon} onChange={(e) => setDanjon(Number(e.target.value))}>
-            {DANJON_LABELS_AR.map((t, i) => <option key={i} value={i}>{t}</option>)}
-          </select>
-        </label>
-      )}
-      <div style={{ fontSize: '0.78em', opacity: 0.85, textAlign: 'center', maxWidth: W }}>{note}</div>
-    </div>
-  );
 }
 
 // ============================= اللوحة =============================
@@ -129,7 +42,7 @@ const css = {
   seg: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4, padding: 3, borderRadius: 10, background: 'rgba(148,163,184,0.12)' } as const,
   segBtn: (on: boolean) => ({
     padding: '7px 6px', borderRadius: 8, border: 0, cursor: 'pointer', fontSize: '0.9em', fontFamily: 'inherit',
-    color: on ? '#fff' : 'inherit', background: on ? 'rgba(212,160,70,0.55)' : 'transparent',
+    color: on ? '#fff' : 'inherit', background: on ? 'var(--accent)' : 'transparent',
   }) as const,
   card: { padding: '8px 10px', borderRadius: 10, background: 'rgba(148,163,184,0.09)', display: 'grid', gap: 5 } as const,
   h: { fontSize: '0.74em', letterSpacing: 0, opacity: 0.65, margin: '2px 0 0' } as const,
@@ -152,7 +65,7 @@ export function EclipsePanel() {
   const [tab, setTab] = useState<Tab>('solar');
   const [sel, setSel] = useState<number | null>(null); // peakMs للحدث المفتوح
 
-  const date = useSimulationStore((s) => s.date);
+  const date = useSimDate(500);
   const observer = useSimulationStore((s) => s.observer);
   const focus = useSimulationStore((s) => s.eclipseFocus);
   const y = year ?? date.getFullYear();
@@ -187,19 +100,10 @@ export function EclipsePanel() {
 
   return (
     <div className="icon-item">
-      <button className="icon-trigger" data-active={open || !!focus} onClick={() => setOpen((v) => !v)} title="الكسوف والخسوف">
-        <Moon size={19} />
-        <span className="icon-caption">كسوف</span>
-        {focus && <span className="badge-dot" />}
-      </button>
+      <NavRow icon={Moon} title="الكسوف والخسوف" active={open || !!focus} badge={!!focus} onClick={() => setOpen((v) => !v)} />
       {open && (
-        <div className="popover-panel" role="dialog" aria-label="الكسوف والخسوف" style={{ maxHeight: '85vh', overflowY: 'auto', width: 360 }}>
-          <div className="popover-header">
-            <Moon size={16} />
-            <span className="popover-title-text">الكسوف والخسوف</span>
-            <button className="popover-close" onClick={() => setOpen(false)}><X size={16} /></button>
-          </div>
-          <div className="popover-body" style={{ display: 'grid', gap: 10 }}>
+        <Flyout icon={Moon} title="الكسوف والخسوف" onClose={() => setOpen(false)}>
+          <div style={{ display: 'grid', gap: 10 }}>
             {!current ? (
               <>
                 <div className="stepper-row">
@@ -243,7 +147,7 @@ export function EclipsePanel() {
                         {(tags.length > 0 || horizontal) && (
                           <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
                             {tags.map((t) => <span key={t} style={{ fontSize: '0.7em', padding: '1px 7px', borderRadius: 8, background: 'rgba(148,163,184,0.22)' }}>{t}</span>)}
-                            {horizontal && <span style={{ fontSize: '0.7em', padding: '1px 7px', borderRadius: 8, background: 'rgba(212,160,70,0.3)' }}>خسوف مقلوب (أفقي)</span>}
+                            {horizontal && <span style={{ fontSize: '0.7em', padding: '1px 7px', borderRadius: 8, background: 'var(--accent)', color: '#fff' }}>خسوف مقلوب (أفقي)</span>}
                           </div>
                         )}
                       </button>
@@ -258,7 +162,7 @@ export function EclipsePanel() {
               الأزمنة بتوقيت جهازك (والتوقيت العالمي بجانبها). المحاكاة بمكتبة astronomy-engine؛ وقد يختلف التقدير عن جداول ناسا بأجزاء من المئة في القدر وبثوانٍ في الأزمنة.
             </div>
           </div>
-        </div>
+        </Flyout>
       )}
     </div>
   );
@@ -274,7 +178,7 @@ function Detail({ row, onBack }: { row: Row; onBack: () => void }) {
         <button className="clear-btn" onClick={onBack} style={{ width: 'auto', padding: '4px 10px' }}>‹ القائمة</button>
         <div style={{ textAlign: 'left' }}>
           <div style={{ fontWeight: 600 }}>{eclipseTitleAr(e)}</div>
-          <div style={{ fontSize: '0.78em', opacity: 0.75 }}>{fmtDate(e.peak)}</div>
+          <div style={{ fontSize: '0.78em', opacity: 0.75 }}>{fmtDate(e.peak)} · سلسلة ساروس {sarosSeries(e.peak, solar ? 'solar' : 'lunar')}</div>
         </div>
       </div>
       {solar
@@ -323,7 +227,7 @@ function SolarDetails({ e, loc }: { e: SolarEclipseEvent; loc: LocalSolarCircums
           <>
             <KV k="النوع" v={loc.kind === 'total' ? 'كلي' : loc.kind === 'annular' ? 'حلقي' : 'جزئي'} />
             <KV k="القدر" v={loc.magnitude.toFixed(3)} />
-            <KV k="نسبة التغطية" v={`${(loc.obscuration * 100).toFixed(1)}%`} />
+            <KV k="نسبة القرص المظلم" v={`${(loc.obscuration * 100).toFixed(1)}%`} />
             {loc.centralDurationSec ? <KV k="مدة المركزي" v={`${Math.floor(loc.centralDurationSec / 60)}د ${Math.round(loc.centralDurationSec % 60)}ث`} /> : null}
             <div style={{ display: 'grid', gap: 4, marginTop: 4 }}>
               {contacts.map(([label, p]) => p ? (
@@ -349,7 +253,7 @@ function SolarDetails({ e, loc }: { e: SolarEclipseEvent; loc: LocalSolarCircums
         </button>
       </div>
 
-      <LiveView event={e} />
+      <LiveView kind="solar" />
     </>
   );
 }
@@ -388,7 +292,7 @@ function LunarDetails({ e, loc }: { e: LunarEclipseEvent; loc?: LocalLunarCircum
         <Play size={13} /> تشغيل الخسوف
       </button>
 
-      <LiveView event={e} />
+      <LiveView kind="lunar" />
     </>
   );
 }

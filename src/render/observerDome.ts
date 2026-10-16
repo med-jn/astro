@@ -30,7 +30,8 @@ import { directSunLight } from '../core/skyRadiance';
 import { getDomeSkyCanvas, DOME_SKY_SIZE } from './domeSky';
 import { limitingMagnitude, makeSkyFrame, placeRaDecJ2000, refractionDeg, StarField, starAlpha } from '../core/skyModel';
 import { getMoonImage } from './bodyImages';
-import { paintEarthShadowDisc, moonTexFromAxes } from './eclipseOverlay';
+import { resolveLook } from '../core/danjon';
+import { paintDarkRegion, moonTexFromAxes } from './eclipseOverlay';
 import { solarViewAt, lunarShadowOnSky, moonPoleAngleDeg, type SolarView } from '../core/eclipses';
 
 const DEG = Math.PI / 180;
@@ -868,7 +869,7 @@ export function drawObserverDome(
       if (s.penumbralMagnitude > 0) {
         const cx = moonP.x + moonR * (s.eastMoonRadii * moonAxes.e.x + s.northMoonRadii * moonAxes.n.x);
         const cy = moonP.y + moonR * (s.eastMoonRadii * moonAxes.e.y + s.northMoonRadii * moonAxes.n.y);
-        paintEarthShadowDisc(ctx, moonP.x, moonP.y, moonR, cx, cy, s.umbra * moonR, s.penumbra * moonR);
+        paintDarkRegion(ctx, moonP.x, moonP.y, moonR, cx, cy, s.umbra * moonR, s.penumbra * moonR, resolveLook(input.date));
       }
     }
   };

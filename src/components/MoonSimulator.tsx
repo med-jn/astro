@@ -1,13 +1,8 @@
 import { useMemo } from 'react';
 import { fmtDateTime, useI18n, type TKey } from '../i18n';
-import {
-  findPhase,
-  lunarState,
-  moonAgeDays,
-  moonAppearance,
-  phaseIndex,
-} from '../core/lunar';
-import { MoonCanvas, MoonDisc } from './MoonCanvas';
+import { findPhase, lunarState, moonAgeDays, moonIllumination, phaseIndex } from '../core/lunar';
+import { lunarViewAt } from '../core/eclipses';
+import { MoonPhaseIcon, MoonView } from './MoonView';
 
 /* ------------------------------------------------------------------ */
 /*  موضع الشمس والقمر على دائرة البروج (قراءة موضعية محايدة)             */
@@ -76,7 +71,11 @@ export function MoonSimulator({
   const idx = phaseIndex(elongation);
   const age = useMemo(() => moonAgeDays(date), [date]);
   const st = useMemo(() => lunarState(date), [date]);
-  const app = useMemo(() => moonAppearance(date, latitudeDeg, longitudeDeg), [date, latitudeDeg, longitudeDeg]);
+  const illum = useMemo(() => moonIllumination(date), [date]);
+  const eclipsePhase = useMemo(
+    () => lunarViewAt(date, { latitudeDeg, longitudeDeg }).phase,
+    [date, latitudeDeg, longitudeDeg],
+  );
   const diamArcmin = st.moonSemiDia * 2 * 60;
 
   const hourKey = Math.floor(date.getTime() / 3_600_000);
@@ -93,16 +92,19 @@ export function MoonSimulator({
       <div className="sim-hero">
         <figure className="moon-figure">
           <div className="moon-stage">
-            <MoonCanvas appearance={app} size={150} label={t(`phase_${idx}` as TKey)} />
+            <MoonView date={date} size={210} />
           </div>
           <figcaption>{t('view_local')}</figcaption>
         </figure>
         <div className="sim-hero-side">
           <div className="phase-name">{t(`phase_${idx}` as TKey)}</div>
+          {eclipsePhase !== 'none' && (
+            <div className="eclnow-head">{t('ecl_lunar')} · {t(`ev_phase_${eclipsePhase}` as TKey)}</div>
+          )}
           <dl className="metric-grid metric-grid-1">
             <div className="metric">
               <dt>{t('m_illum')}</dt>
-              <dd className="num">{(app.illumination * 100).toFixed(1)}%</dd>
+              <dd className="num">{(illum * 100).toFixed(1)}%</dd>
             </div>
             <div className="metric">
               <dt>{t('m_age')}</dt>
@@ -119,7 +121,7 @@ export function MoonSimulator({
       <div className="phase-strip" role="list">
         {Array.from({ length: 8 }, (_, i) => (
           <div key={i} role="listitem" className="phase-strip-item" data-current={i === idx} title={t(`phase_${i}` as TKey)}>
-            <MoonDisc elongation={i * 45} size={30} southern={southern} label={t(`phase_${i}` as TKey)} />
+            <MoonPhaseIcon elongation={i * 45} size={32} southern={southern} />
           </div>
         ))}
       </div>
@@ -132,7 +134,7 @@ export function MoonSimulator({
           const days = (p.when.getTime() - date.getTime()) / 86_400_000;
           return (
             <li key={p.deg} className="event-row">
-              <MoonDisc elongation={p.deg} size={26} southern={southern} />
+              <MoonPhaseIcon elongation={p.deg} size={28} southern={southern} />
               <span className="event-main">
                 <span className="event-title">{t(`phase_${p.idx}` as TKey)}</span>
                 <span className="event-sub num">

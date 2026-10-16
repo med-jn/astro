@@ -7,10 +7,11 @@ import { getGroupById, getGroupAliases, getGroupMembers } from '../core/starGrou
 import { fmtDeg, hoursToHMS, useI18n, type TKey } from '../i18n';
 import { mansionName } from '../i18n/names';
 import { lunarState, norm360, phaseIndex } from '../core/lunar';
-import { MoonDisc } from './MoonCanvas';
+import { MoonPhaseIcon } from './MoonView';
 import { MoonSimulator } from './MoonSimulator';
 import { useSettings } from '../settings';
-import { EclipseSimulator } from './EclipseSimulator';
+import { useSimDate } from '../hooks';
+import { EclipseNow } from './EclipseNow';
 
 interface Props {
   output: RenderOutput | null;
@@ -22,7 +23,7 @@ export function InfoCard({ output }: Props) {
   const { t, lang } = useI18n();
   const { showInfoCard } = useSettings();
   const selectedGroupIds = useSimulationStore((s) => s.selectedGroupIds);
-  const date = useSimulationStore((s) => s.date);
+  const date = useSimDate(200);
   const observer = useSimulationStore((s) => s.observer);
   const setDate = useSimulationStore((s) => s.setDate);
 
@@ -116,7 +117,7 @@ export function InfoCard({ output }: Props) {
           </div>
           <div className="info-row">
             <span className="badge badge-moon">
-              <MoonDisc elongation={elongation} size={20} southern={southern} />
+              <MoonPhaseIcon elongation={elongation} size={22} southern={southern} />
             </span>
             <span className="info-label">{t('moon_mansion')}</span>
             <span className="info-value">
@@ -147,14 +148,7 @@ export function InfoCard({ output }: Props) {
               {tab === 'moon' && (
                 <MoonSimulator date={date} elongation={elongation} latitudeDeg={observer.latitudeDeg} longitudeDeg={observer.longitudeDeg} onGoTo={setDate} />
               )}
-              {tab === 'eclipse' && (
-                <EclipseSimulator
-                  date={date}
-                  latitudeDeg={observer.latitudeDeg}
-                  longitudeDeg={observer.longitudeDeg}
-                  onGoTo={setDate}
-                />
-              )}
+              {tab === 'eclipse' && <EclipseNow />}
               {tab === 'data' && (
                 <dl className="metric-grid">
                   <div className="metric"><dt>{t('d_sun')} · {t('d_sun_lon')}</dt><dd className="num">{(sunLon ?? st.sunLon).toFixed(3)}°</dd></div>

@@ -688,19 +688,9 @@ input[type='range'].slider {
 
 .sim-hero { display: grid; grid-template-columns: auto 1fr; gap: 14px; align-items: center; }
 @media (max-width: 420px) { .sim-hero { grid-template-columns: 1fr; justify-items: center; } }
-.moon-figure { display: flex; flex-direction: column; align-items: center; gap: 6px; width: 168px; overflow: visible; }
-.moon-stage { display: grid; place-items: center; width: 168px; height: 168px; }
-.moon-wrap { position: relative; display: grid; place-items: center; }
-.moon-wrap canvas { position: relative; display: block; }
-/* توهج يشتد مع الإضاءة ويبلغ ذروته عند الاكتمال */
-.moon-glow {
-  position: absolute; top: 50%; inset-inline-start: 50%;
-  transform: translate(-50%, -50%);
-  border-radius: 50%;
-  pointer-events: none;
-}
-:root[dir='rtl'] .moon-glow { transform: translate(50%, -50%); }
-.moon-figure figcaption { font-size: 0.64rem; color: var(--text-3); text-align: center; line-height: 1.3; }
+.moon-figure { display: flex; flex-direction: column; align-items: center; gap: 6px; width: 210px; overflow: visible; }
+.moon-stage { display: grid; place-items: center; width: 210px; height: 210px; }
+:root[dir='rtl'] .moon-figure figcaption { font-size: 0.64rem; color: var(--text-3); text-align: center; line-height: 1.3; }
 .sim-hero-side { display: flex; flex-direction: column; gap: 10px; min-width: 0; width: 100%; }
 .phase-name { font-size: 1.1rem; font-weight: 600; color: var(--text-1); }
 
@@ -777,3 +767,11 @@ input[type='range'].slider {
 .look-chip:hover { border-color: var(--accent); color: var(--text-1); }
 .look-chip[data-selected='true'] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 .look-dot { width: 14px; height: 14px; border-radius: 50%; flex-shrink: 0; border: 1px solid #ffffff55; }
+
+/* ---------- المنظر الحي للكسوف والخسوف ---------- */
+.live-view { display: grid; gap: 8px; justify-items: center; }
+.live-view .section { width: 100%; }
+.live-canvas { border-radius: var(--r-md); border: 1px solid var(--line-strong); max-width: 100%; }
+.live-note { font-size: 0.78rem; color: var(--text-2); text-align: center; max-width: 300px; line-height: 1.5; }
+.eclnow-head { display: flex; align-items: center; gap: 8px; font-size: 0.84rem; font-weight: 600; color: var(--text-1); }
+.moon-view, .moon-icon { display: block; }
