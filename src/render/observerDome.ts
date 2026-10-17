@@ -23,7 +23,9 @@ import { getGroupLines } from '../core/starGroups';
 import { getLoadedZodiac, type ZodiacKey } from '../core/zodiac';
 import { getAllLunarMansions, MANSION_SPAN_DEG } from '../core/mansions';
 import { eclipticLongitudeToEquatorial } from '../core/eclipticTransform';
-import { PLANET_COLORS, PLANET_LABELS_AR } from '../core/bodies';
+import { PLANET_COLORS, planetLabel } from '../core/bodies';
+import { getLang, tr } from '../i18n';
+import { mansionName } from '../i18n/names';
 import { fillTextUpright, getSceneRotationRad, labelGap } from './uprightText';
 import { computeAuroraArcs, auroraBrightness, type AuroraArc } from '../core/aurora';
 import { directSunLight } from '../core/skyRadiance';
@@ -206,7 +208,7 @@ function paintDomeSky(
  * قرص الشمس بحسب ارتفاعها الظاهري: اللون من انطفاء الجو على الكتلة الهوائية (برتقالي محمرّ عند الأفق ثم أصفر فأبيض)،
  * والسطوع لوغاريتمي — عند الشروق/الغروب خافت لكن حدوده حادّة واضحة، وفي الظهيرة ساطع جداً يحترق قلبه إلى الأبيض وتحيط به هالة واسعة.
  */
-function paintDomeSun(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, altApp: number) {
+export function paintDomeSun(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, altApp: number) {
   const { rgb, rel } = directSunLight(altApp);
   // اللون: نسب القنوات بأسّ 0.33 (تكيّف العين يخفّف تطرف اللون الفيزيائي) ثم تطبيع
   const hue = rgb.map((v) => Math.pow(Math.max(v, 1e-9), 0.33));
@@ -530,7 +532,7 @@ export function drawObserverDome(
     const alt = apparentAltitude(h.altDeg);
     return { ...domePoint(f, alt, h.azDeg), altDeg: alt, azDeg: h.azDeg };
   };
-  const detailOf = (alt: number, az: number) => `على القبة · ارتفاع ${alt.toFixed(1)}° · سمت ${az.toFixed(1)}°`;
+  const detailOf = (alt: number, az: number) => tr('dome_detail', { alt: alt.toFixed(1), az: az.toFixed(1) });
 
   // ── الكسوف والخسوف: لا حساب إلا والجرمان متقاربان (أو متقابلان) ──
   const sepEq = eqSepDeg(
@@ -766,7 +768,7 @@ export function drawObserverDome(
     const p = toDome(raHours, decDeg);
     if (p.altDeg < 0) return;
     labels.push({
-      text: m.nameAr, x: p.x, y: p.y, ox: 0, oy: bright ? -10 * uiScale : 0,
+      text: mansionName(m, getLang()), x: p.x, y: p.y, ox: 0, oy: bright ? -10 * uiScale : 0,
       font: `bold ${(bright ? 11 : 9) * uiScale}px system-ui, sans-serif`,
       color: bright ? ACCENT_LINE_BRIGHT : 'rgba(201, 172, 120, 0.9)', align: 'center',
       prio: bright ? 60 : 15, alpha: 1, flip: false,
@@ -815,7 +817,7 @@ export function drawObserverDome(
       ctx.globalAlpha = a;
       helpers.drawPlanetDot(ctx, { x: p.x, y: p.y, visible: true }, r, color, uiScale);
       ctx.restore();
-      const nameAr = PLANET_LABELS_AR[name as keyof typeof PLANET_LABELS_AR] ?? name;
+      const nameAr = planetLabel(name);
       if (input.labels) {
         labels.push({
           text: nameAr, x: p.x, y: p.y, ox: labelGap(r, uiScale), oy: -(3 + uiScale),
@@ -913,18 +915,18 @@ export function drawObserverDome(
     const font = `${10 * uiScale}px system-ui, sans-serif`;
     // الشمس والقمر فوق الجميع. اسم القمر في الجهة المعاكسة للشمس إن تقاربا حتى لا يتراكب الاسمان
     if (sunAlt > -1) {
-      labels.push({ text: 'الشمس', x: sunP.x, y: sunP.y, ox: 0, oy: -gap - 2 * uiScale, font, color: '#fde68a', align: 'center', prio: 100, alpha: 1, flip: false });
+      labels.push({ text: tr('body_sun'), x: sunP.x, y: sunP.y, ox: 0, oy: -gap - 2 * uiScale, font, color: '#fde68a', align: 'center', prio: 100, alpha: 1, flip: false });
     }
     if (moonAlt > -1) {
       const below = Math.hypot(moonP.x - sunP.x, moonP.y - sunP.y) < bodyRadius * 5 && moonP.y <= sunP.y;
-      labels.push({ text: 'القمر', x: moonP.x, y: moonP.y, ox: 0, oy: below ? moonR + 12 * uiScale : -moonR - 6 * uiScale, font, color: '#e2e8f0', align: 'center', prio: 100, alpha: 1, flip: false });
+      labels.push({ text: tr('body_moon'), x: moonP.x, y: moonP.y, ox: 0, oy: below ? moonR + 12 * uiScale : -moonR - 6 * uiScale, font, color: '#e2e8f0', align: 'center', prio: 100, alpha: 1, flip: false });
     }
   }
   if (sunAlt > -1) {
-    targets.push({ x: sunP.x, y: sunP.y, name: 'الشمس', detail: detailOf(sunAlt, sunAz) });
+    targets.push({ x: sunP.x, y: sunP.y, name: tr('body_sun'), detail: detailOf(sunAlt, sunAz) });
   }
   if (moonAlt > -1) {
-    targets.push({ x: moonP.x, y: moonP.y, name: 'القمر', detail: detailOf(moonAlt, moonAz) });
+    targets.push({ x: moonP.x, y: moonP.y, name: tr('body_moon'), detail: detailOf(moonAlt, moonAz) });
   }
 
   ctx.restore();

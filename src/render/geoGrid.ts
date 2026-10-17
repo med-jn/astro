@@ -10,6 +10,7 @@
  *
  * كل الأسماء تبقى أفقية مهما دار المشهد (fillTextUpright).
  */
+import { tr } from '../i18n';
 import { GREENWICH_DOWN_OFFSET_DEG, type PolarMapConfig } from '../core/projection';
 import { computeViewRect, type ViewportInfo } from '../core/vectorMap';
 import { fillTextUpright } from './uprightText';
@@ -38,7 +39,7 @@ function meridianInnerRadius(stepDeg: number, minSpacingPx: number): number {
 
 function lonLabel(lon: number): string {
   if (lon === 0 || lon === 180) return `${lon}°`;
-  return lon < 180 ? `${lon}°ق` : `${360 - lon}°غ`;
+  return lon < 180 ? `${lon}°${tr('short_e')}` : `${360 - lon}°${tr('short_w')}`;
 }
 
 export interface GridOptions {
@@ -113,7 +114,7 @@ export function drawGeoGrid(
       for (let lat = 80; lat >= -80; lat -= 10) {
         if (lat === 0) continue; // خط الاستواء له اسمه في طبقة المدارات
         const r = ((90 - lat) / 180) * R;
-        fillTextUpright(ctx, `${Math.abs(lat)}°${lat > 0 ? 'ش' : 'ج'}`, cx + dx * r, cy + dy * r, 6, -(4 + uiScale));
+        fillTextUpright(ctx, `${Math.abs(lat)}°${lat > 0 ? tr('short_n') : tr('short_s')}`, cx + dx * r, cy + dy * r, 6, -(4 + uiScale));
       }
     }
   }

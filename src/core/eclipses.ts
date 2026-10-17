@@ -1,4 +1,5 @@
 import * as Astronomy from 'astronomy-engine';
+import { tr, type TKey } from '../i18n';
 
 /**
  * الكسوف والخسوف — كل الحسابات من astronomy-engine مباشرة (لا جداول ثابتة ولا تقريبات هندسية):
@@ -93,17 +94,11 @@ export interface LunarEclipseEvent {
 
 export type EclipseEvent = SolarEclipseEvent | LunarEclipseEvent;
 
-export const SOLAR_KIND_AR: Record<SolarKind, string> = {
-  partial: 'كسوف جزئي', annular: 'كسوف حلقي', total: 'كسوف كلي', hybrid: 'كسوف هجين (حلقي/كلي)',
-};
-export const LUNAR_KIND_AR: Record<LunarKind, string> = {
-  penumbral: 'خسوف هامشي', partial: 'خسوف جزئي', total: 'خسوف كلي',
-};
-
-export function eclipseTitleAr(e: EclipseEvent): string {
-  if (e.type === 'lunar') return LUNAR_KIND_AR[e.kind];
-  const base = SOLAR_KIND_AR[e.kind];
-  return e.central || e.kind === 'partial' ? base : `${base} غير مركزي`;
+/** عنوان الحدث بلغة التطبيق */
+export function eclipseTitle(e: EclipseEvent): string {
+  if (e.type === 'lunar') return tr(`ev_t_lunar_${e.kind}` as TKey);
+  const base = tr(`ev_t_solar_${e.kind}` as TKey);
+  return e.central || e.kind === 'partial' ? base : tr('ev_noncentral', { base });
 }
 
 // ============================= الإطار الأرضي والهندسة =============================
@@ -986,15 +981,17 @@ export function moonPoleAngleDeg(date: Date): number {
  * أوصاف شائعة للخسوف: «قمر الدم» (كلي)، «القمر العملاق» (المسافة ≤ 361500 كم (تعريف نولّ التقريبي: ضمن 90% من أقرب حضيض))، «القمر الأزرق» (بدر ثانٍ في الشهر الميلادي
  * نفسه بالتوقيت العالمي)، «القمر المصغَّر» (≥ 405000 كم). هذه تسميات تقويمية/مسافية لا ألوان فعلية للقمر.
  */
-export function lunarEclipseTags(e: LunarEclipseEvent): string[] {
-  const tags: string[] = [];
-  if (e.kind === 'total') tags.push('قمر الدم');
+export type LunarTag = 'blood' | 'super' | 'micro' | 'blue';
+
+export function lunarEclipseTags(e: LunarEclipseEvent): LunarTag[] {
+  const tags: LunarTag[] = [];
+  if (e.kind === 'total') tags.push('blood');
   const t = Astronomy.MakeTime(e.peak);
   const distKm = Astronomy.GeoVector(Astronomy.Body.Moon, t, false).Length() * KM_PER_AU;
-  if (distKm <= 361500) tags.push('قمر عملاق');
-  else if (distKm >= 405000) tags.push('قمر مصغَّر');
+  if (distKm <= 361500) tags.push('super');
+  else if (distKm >= 405000) tags.push('micro');
   const monthStart = new Date(Date.UTC(e.peak.getUTCFullYear(), e.peak.getUTCMonth(), 1));
   const firstFull = Astronomy.SearchMoonPhase(180, monthStart, 40);
-  if (firstFull && firstFull.date.getTime() < e.peak.getTime() - 36 * 3600 * 1000) tags.push('قمر أزرق');
+  if (firstFull && firstFull.date.getTime() < e.peak.getTime() - 36 * 3600 * 1000) tags.push('blue');
   return tags;
 }

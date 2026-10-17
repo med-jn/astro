@@ -3,6 +3,7 @@ import { Volume2, Hand, Clock, LocateFixed } from 'lucide-react';
 import { useSimulationStore, SECONDS_PER_DAY } from '../state/store';
 import { renderSky, type RenderOutput, type HitTarget } from '../render/skyRenderer';
 import { computeOuterRadiusPx } from '../core/projection';
+import { useI18n } from '../i18n';
 
 interface Props {
   onFrame?: (output: RenderOutput) => void;
@@ -42,14 +43,15 @@ function toolButtonStyle(active: boolean): CSSProperties {
     padding: 0,
     borderRadius: 10,
     cursor: 'pointer',
-    color: active ? '#d4b688' : '#cbd5e1',
-    background: active ? 'rgba(176, 141, 87, 0.22)' : 'rgba(10, 14, 22, 0.82)',
-    border: `1px solid ${active ? '#b08d57' : 'rgba(226, 232, 240, 0.18)'}`,
+    color: active ? '#ffffff' : '#cbd5e1',
+    background: active ? '#2f74f0' : '#0c1015',
+    border: `1px solid ${active ? '#2f74f0' : '#323e4c'}`,
     backdropFilter: 'blur(6px)',
   };
 }
 
 export function SkyCanvas({ onFrame }: Props) {
+  const { t } = useI18n();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rafRef = useRef<number>(0);
   const lastTimestampRef = useRef<number>(0);
@@ -151,6 +153,11 @@ export function SkyCanvas({ onFrame }: Props) {
         state.stepTime(deltaSeconds);
       }
 
+      // عين الراصد مفتوحة: يستمر تقدّم الزمن أعلاه ويُتخطى رسم الخريطة
+      if (document.body.classList.contains('eye-view-open')) {
+        rafRef.current = requestAnimationFrame(loop);
+        return;
+      }
       const rect = canvas!.getBoundingClientRect();
       const currentState = useSimulationStore.getState();
       const output = renderSky(ctx!, rect.width, rect.height, {
@@ -485,9 +492,7 @@ export function SkyCanvas({ onFrame }: Props) {
           style={toolButtonStyle(timeMode)}
           aria-pressed={timeMode}
           title={
-            timeMode
-              ? 'السحب الآن يحرّك الزمن — اضغط للعودة إلى تحريك الخريطة'
-              : 'السحب الآن يحرّك الخريطة — اضغط للتبديل إلى تحريك الزمن'
+            timeMode ? t('sky_drag_time') : t('sky_drag_map')
           }
           onClick={() => setTimeMode((v) => !v)}
         >
@@ -496,7 +501,7 @@ export function SkyCanvas({ onFrame }: Props) {
         <button
           type="button"
           style={toolButtonStyle(false)}
-          title="إعادة العرض إلى المركز (يحفظ التدوير والزمن)"
+          title={t('sky_recenter')}
           onClick={recenterView}
         >
           <LocateFixed size={18} />
@@ -508,7 +513,7 @@ export function SkyCanvas({ onFrame }: Props) {
           <div className="hover-tooltip-row">
             <span className="hover-tooltip-name">{tooltip.name}</span>
             {tooltip.audioUrl && (
-              <button className="hover-tooltip-audio-btn" onClick={() => playAudio(tooltip.audioUrl!)} title="استماع">
+              <button className="hover-tooltip-audio-btn" onClick={() => playAudio(tooltip.audioUrl!)} title={t('sky_listen')}>
                 <Volume2 size={12} />
               </button>
             )}

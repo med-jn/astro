@@ -1,0 +1,11 @@
+دمج «عين الراصد» (D1 + الواقعية + الاختصارات) مع حزمة astro-step3 — انسخ هذه الحزمة فوق المشروع.
+
+الأساس: astro-main + astro-step3 (كما هي عندك). كل ما هنا إما جديد من عمل «عين الراصد» أو ملف تعارض فيه الطرفان فدُمج ثلاثياً.
+
+ملفات دُمجت (تحتوي تعديلاتك وتعديلاتي معاً — لا تنسخ نسخة قديمة منها):
+  src/i18n/ar.ts, en.ts        قاموسك + مفاتيح eye_* و sc_* و nav_eye*؛ حُذف ecl_none (يتيم عندك)
+  src/components/SkyCanvas.tsx تعديلاتك + خطّاف eye-view-open (5 أسطر)
+  src/render/skyRenderer.ts, observerDome.ts  تعديلاتك + export لثلاث دوال فقط
+
+ما تغيّر في الاختبارات: tests/neutrality.test.ts (استثناء ضيق للفظ «ظل/shadow» في مفاتيح eye_sd_ فقط).
+لم ألمس tests/i18n.test.ts ولا hardcoded.test.ts ولا names.test.ts.

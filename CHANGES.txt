@@ -1,38 +1,27 @@
-انسخ هذه الملفات فوق مشروعك (بالمسارات نفسها)، ثم: npm i  (يثبّت vitest)، ثم: npm test
+انسخ هذه الملفات فوق مشروعك بالمسارات نفسها (بعد حزمة step2)، ثم: npm test
 
-جديد  src/components/EclipseLiveView.tsx
-جديد  src/components/EclipseNow.tsx
-جديد  src/components/MoonView.tsx
-جديد  src/components/ui.tsx
-جديد  src/core/danjon.ts
-جديد  src/core/saros.ts
-جديد  src/hooks.ts
-جديد  src/state/jump.ts
-جديد  tests/eclipses.test.ts
-جديد  tests/helpers.ts
-جديد  tests/i18n.test.ts
-جديد  tests/neutrality.test.ts
-جديد  vitest.config.ts
-معدَّل package.json
-معدَّل src/App.tsx
-معدَّل src/components/ControlsPanel.tsx
+جديد  tests/hardcoded.test.ts
+جديد  tests/names.test.ts
+معدَّل src/components/EclipseNow.tsx
 معدَّل src/components/EclipsePanel.tsx
-معدَّل src/components/InfoCard.tsx
-معدَّل src/components/MoonSimulator.tsx
+معدَّل src/components/SkyCanvas.tsx
 معدَّل src/components/StarSearchBar.tsx
+معدَّل src/core/bodies.ts
+معدَّل src/core/conNames.ts
+معدَّل src/core/contentRegistry.ts
 معدَّل src/core/eclipses.ts
-معدَّل src/core/lunar.ts
+معدَّل src/core/starCatalog.ts
+معدَّل src/core/starSearch.ts
 معدَّل src/i18n/ar.ts
 معدَّل src/i18n/en.ts
-معدَّل src/index.css
-معدَّل src/render/eclipseOverlay.ts
+معدَّل src/i18n/index.ts
+معدَّل src/i18n/names.ts
 معدَّل src/render/eclipseView.ts
+معدَّل src/render/geoGrid.ts
 معدَّل src/render/observerDome.ts
 معدَّل src/render/skyRenderer.ts
-معدَّل src/settings.ts
+معدَّل tests/i18n.test.ts
+معدَّل vitest.config.ts
 
 ملفات تُحذف:
-src/components/EclipseSimulator.tsx
-src/components/MoonCanvas.tsx
-src/core/eclipseLooks.ts
-src/core/moonShading.ts
+(لا شيء)

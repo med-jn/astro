@@ -1,0 +1,13 @@
+المرحلة 2 — مشهد منظوري واقعي على كرت الشاشة + تحكم سلس + اختصارات التطبيق. تُنسخ فوق الحزم السابقة (الدفعة 1، 2+3، A، stage1).
+
+جديد   src/render/eyeGpu.ts              (WebGL2: السماء ثم الأرض والتلال بدقة الشاشة؛ مروج ويابس وأزهار وتربة وحصى؛ يبقى المسار الحاسوبي بديلاً)
+جديد   src/shortcuts.ts                  (تعريف واحد للاختصارات: يُنفَّذ ويُعرض في الإعدادات)
+جديد   src/components/GlobalShortcuts.tsx (اختصارات عامة: زمن، طبقات، عين الراصد، ملء الشاشة، ؟)
+جديد   src/components/ShortcutsGuide.tsx  (إرشادات الاختصارات في صفحة الإعدادات)
+معدَّل  src/render/eyeBackground.ts       (تعريض يتبع الأدنى بين الأرض والسماء؛ ربط GPU)
+معدَّل  src/render/eyeRenderer.ts         (أسماء الجهات أكبر؛ خط الأفق وتدريجاته مع شبكة السمت فقط)
+معدَّل  src/core/camera.ts                (الافتراضي: منظوري، مجال 70°، ارتفاع 12°)
+معدَّل  src/state/eye.ts                  (الافتراضي: منظوري 70°)
+معدَّل  src/components/ObserverView.tsx   (التحكم السلس: أسهم مستمرة بتسارع، عجلة/قرص بتكبير ناعم تحت المؤشر، قصور بعد السحب، Home وS/M/Z/T و1-3)
+معدَّل  src/App.tsx, src/components/ControlsPanel.tsx, src/i18n/ar.ts, en.ts, src/index.css
+جديد   docs/preview-eye-gpu.png          (معاينة: نهار / غسق / ليل، من اختبار في Chromium)

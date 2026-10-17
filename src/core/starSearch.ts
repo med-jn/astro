@@ -7,6 +7,8 @@ import { getAllLunarMansions, MANSION_SPAN_DEG } from './mansions';
 import { eclipticLongitudeToEquatorial, getMeanObliquityDeg } from './eclipticTransform';
 import { getGMSTDeg } from './bodies';
 import { getConstellationGroups, getGroupAliases, computeGroupCenter } from './starGroups';
+import { getLang, tr } from '../i18n';
+import { zodiacName, mansionName, groupName } from '../i18n/names';
 
 /** تبسيط عربي خفيف للمقارنة: إزالة التشكيل وتوحيد أشكال الألف/الياء/التاء المربوطة */
 function normalizeArabic(input: string): string {
@@ -83,7 +85,7 @@ function searchZodiacs(query: string, obliquityDeg: number): SearchResult[] {
 
     const { raHours, decDeg } = eclipticLongitudeToEquatorial(midLon, obliquityDeg);
     results.push({
-      kind: 'zodiac', id: `zodiac:${key}`, label: `${nameAr} (برج)`,
+      kind: 'zodiac', id: `zodiac:${key}`, label: `${zodiacName(key, nameAr, getLang())} (${tr('kind_zodiac')})`,
       centerRaHours: raHours, centerDecDeg: decDeg, zodiacKey: key,
     });
   });
@@ -97,12 +99,12 @@ function searchMansions(query: string, obliquityDeg: number): SearchResult[] {
   const results: SearchResult[] = [];
 
   for (const m of getAllLunarMansions()) {
-    if (!normalizeArabic(m.nameAr).includes(q)) continue;
+    if (!normalizeArabic(m.nameAr).includes(q) && !normalizeArabic(mansionName(m, 'en')).includes(q)) continue;
 
     const midLon = m.startLongitudeDeg + MANSION_SPAN_DEG / 2;
     const { raHours, decDeg } = eclipticLongitudeToEquatorial(midLon, obliquityDeg);
     results.push({
-      kind: 'mansion', id: `mansion:${m.index}`, label: `${m.nameAr} (منزلة)`,
+      kind: 'mansion', id: `mansion:${m.index}`, label: `${mansionName(m, getLang())} (${tr('kind_mansion')})`,
       centerRaHours: raHours, centerDecDeg: decDeg, mansionIndex: m.index,
     });
   }
@@ -128,7 +130,7 @@ function searchGroups(query: string): SearchResult[] {
     if (!center) continue;
 
     results.push({
-      kind: 'group', id: `group:${group.id}`, label: `${group.nameAr} (كوكبة)`,
+      kind: 'group', id: `group:${group.id}`, label: `${groupName(group, getLang())} (${tr('kind_group')})`,
       centerRaHours: center.raHours, centerDecDeg: center.decDeg, groupId: group.id,
     });
   }
@@ -168,12 +170,12 @@ function mergeZodiacIntoGroups(zodiacs: SearchResult[], groups: SearchResult[]):
       const grp = getConstellationGroups().find((x) => x.id === groupId);
       const c = grp && computeGroupCenter(groupId);
       if (!grp || !c) return;
-      r = { kind: 'group', id: `group:${groupId}`, label: grp.nameAr, centerRaHours: c.raHours, centerDecDeg: c.decDeg, groupId };
+      r = { kind: 'group', id: `group:${groupId}`, label: groupName(grp, getLang()), centerRaHours: c.raHours, centerDecDeg: c.decDeg, groupId };
     }
     const merged: SearchResult = { ...r };
     if (zodiacKey) {
       merged.zodiacKey = zodiacKey as ZodiacKey;
-      merged.label = merged.label.replace(/\s*\(.*\)\s*$/, '') + ' (برج وكوكبة)';
+      merged.label = merged.label.replace(/\s*\(.*\)\s*$/, '') + ` (${tr('kind_zodiac_group')})`;
     }
     out.set(groupId, merged);
   };

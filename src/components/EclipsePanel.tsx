@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Moon, Play, MapPin, Crosshair } from 'lucide-react';
 import { useSimulationStore } from '../state/store';
 import {
-  findEclipsesBetween, eclipseTitleAr, localSolarCircumstances, localLunarCircumstances,
+  findEclipsesBetween, eclipseTitle, localSolarCircumstances, localLunarCircumstances,
   lunarEclipseTags,
   type EclipseEvent, type SolarEclipseEvent, type LunarEclipseEvent,
   type LocalSolarCircumstances, type LocalLunarCircumstances,
@@ -10,22 +10,18 @@ import {
 import { jumpTo, playFrom } from '../state/jump';
 import { useSimDate } from '../hooks';
 import { Flyout, NavRow } from './ui';
+import { currentLocale, useI18n, type TKey } from '../i18n';
 import { LiveView } from './EclipseLiveView';
 import { sarosSeries } from '../core/saros';
 
-const LUNAR_PHASE_AR: Record<string, string> = {
-  P1: 'بداية الخسوف الهامشي (P1)', U1: 'بداية الخسوف الجزئي (U1)', U2: 'بداية الخسوف الكلي (U2)', MAX: 'أعظم خسوف',
-  U3: 'نهاية الخسوف الكلي (U3)', U4: 'نهاية الخسوف الجزئي (U4)', P4: 'نهاية الخسوف الهامشي (P4)',
-};
-
 function fmtDate(d: Date): string {
-  return d.toLocaleDateString('ar', { year: 'numeric', month: 'long', day: 'numeric' });
+  return d.toLocaleDateString(currentLocale().date, { year: 'numeric', month: 'long', day: 'numeric' });
 }
 function fmtUT(d: Date): string {
   return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}:${String(d.getUTCSeconds()).padStart(2, '0')}`;
 }
 function fmtTime(d: Date, withSeconds = false): string {
-  return d.toLocaleTimeString('ar', { hour: '2-digit', minute: '2-digit', ...(withSeconds ? { second: '2-digit' } : {}) });
+  return d.toLocaleTimeString(currentLocale().date, { hour: '2-digit', minute: '2-digit', ...(withSeconds ? { second: '2-digit' } : {}) });
 }
 
 interface Row {
@@ -53,13 +49,14 @@ function KV({ k, v }: { k: string; v: string }) {
   return <div style={css.kv}><span style={{ opacity: 0.7 }}>{k}</span><span style={{ textAlign: 'left', direction: 'ltr', unicodeBidi: 'plaintext' }}>{v}</span></div>;
 }
 
-function visInfo(vis: string | undefined): { txt: string; color: string } {
-  if (vis === 'full') return { txt: 'يُرى كاملاً', color: '#6fcf97' };
-  if (vis === 'partial') return { txt: 'يُرى جزئياً', color: '#e5b94d' };
-  return { txt: 'لا يُرى من موقعك', color: '#7b8798' };
+function visInfo(vis: string | undefined): { key: TKey; color: string } {
+  if (vis === 'full') return { key: 'ep_vis_full', color: '#6fcf97' };
+  if (vis === 'partial') return { key: 'ep_vis_partial', color: '#e5b94d' };
+  return { key: 'ep_vis_none', color: '#7b8798' };
 }
 
 export function EclipsePanel() {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [year, setYear] = useState<number | null>(null);
   const [tab, setTab] = useState<Tab>('solar');
@@ -100,14 +97,14 @@ export function EclipsePanel() {
 
   return (
     <div className="icon-item">
-      <NavRow icon={Moon} title="الكسوف والخسوف" active={open || !!focus} badge={!!focus} onClick={() => setOpen((v) => !v)} />
+      <NavRow icon={Moon} title={t('ep_title')} active={open || !!focus} badge={!!focus} onClick={() => setOpen((v) => !v)} />
       {open && (
-        <Flyout icon={Moon} title="الكسوف والخسوف" onClose={() => setOpen(false)}>
+        <Flyout icon={Moon} title={t('ep_title')} onClose={() => setOpen(false)}>
           <div style={{ display: 'grid', gap: 10 }}>
             {!current ? (
               <>
                 <div className="stepper-row">
-                  <span className="stepper-label">السنة</span>
+                  <span className="stepper-label">{t('f_year')}</span>
                   <div className="stepper-controls">
                     <button className="stepper-btn" onClick={() => setYear(y - 1)}>−</button>
                     <span className="stepper-value">{y}</span>
@@ -116,18 +113,18 @@ export function EclipsePanel() {
                 </div>
 
                 <div style={css.seg} role="tablist">
-                  <button role="tab" aria-selected={tab === 'solar'} style={css.segBtn(tab === 'solar')} onClick={() => setTab('solar')}>كسوف الشمس ({nSolar})</button>
-                  <button role="tab" aria-selected={tab === 'lunar'} style={css.segBtn(tab === 'lunar')} onClick={() => setTab('lunar')}>خسوف القمر ({nLunar})</button>
+                  <button role="tab" aria-selected={tab === 'solar'} style={css.segBtn(tab === 'solar')} onClick={() => setTab('solar')}>{t('ep_tab_solar', { n: nSolar })}</button>
+                  <button role="tab" aria-selected={tab === 'lunar'} style={css.segBtn(tab === 'lunar')} onClick={() => setTab('lunar')}>{t('ep_tab_lunar', { n: nLunar })}</button>
                 </div>
 
                 {focus && (
                   <button className="clear-btn" onClick={() => useSimulationStore.getState().setEclipseFocus(null)}>
-                    إخفاء مسار الحدث من الخريطة
+                    {t('ep_hide_path')}
                   </button>
                 )}
 
                 <div style={{ display: 'grid', gap: 6 }}>
-                  {list.length === 0 && <div style={{ opacity: 0.7, padding: 8 }}>لا {tab === 'solar' ? 'كسوف' : 'خسوف'} في هذه السنة.</div>}
+                  {list.length === 0 && <div style={{ opacity: 0.7, padding: 8 }}>{t(tab === 'solar' ? 'ep_none_solar' : 'ep_none_lunar')}</div>}
                   {list.map((r) => {
                     const e = r.event;
                     const solar = e.type === 'solar';
@@ -136,18 +133,18 @@ export function EclipsePanel() {
                     const tags = solar ? [] : lunarEclipseTags(e as LunarEclipseEvent);
                     return (
                       <button key={e.peak.getTime()} className="select-item" aria-pressed={focus?.peakMs === e.peak.getTime()} onClick={() => choose(r)}
-                        style={{ display: 'grid', gap: 3, textAlign: 'right', opacity: v.color === '#7b8798' ? 0.8 : 1 }}>
+                        style={{ display: 'grid', gap: 3, textAlign: 'start', opacity: v.color === '#7b8798' ? 0.8 : 1 }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-                          <strong style={{ fontWeight: 600 }}>{eclipseTitleAr(e)}</strong>
-                          <span style={{ fontSize: '0.78em', color: v.color }}>● {v.txt}</span>
+                          <strong style={{ fontWeight: 600 }}>{eclipseTitle(e)}</strong>
+                          <span style={{ fontSize: '0.78em', color: v.color }}>● {t(v.key)}</span>
                         </div>
                         <div style={{ fontSize: '0.8em', opacity: 0.75 }}>
                           {fmtDate(e.peak)} · {fmtTime(e.peak)}
                         </div>
                         {(tags.length > 0 || horizontal) && (
                           <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
-                            {tags.map((t) => <span key={t} style={{ fontSize: '0.7em', padding: '1px 7px', borderRadius: 8, background: 'rgba(148,163,184,0.22)' }}>{t}</span>)}
-                            {horizontal && <span style={{ fontSize: '0.7em', padding: '1px 7px', borderRadius: 8, background: 'var(--accent)', color: '#fff' }}>خسوف مقلوب (أفقي)</span>}
+                            {tags.map((tg) => <span key={tg} style={{ fontSize: '0.7em', padding: '1px 7px', borderRadius: 8, background: 'rgba(148,163,184,0.22)' }}>{t(`tag_${tg}` as TKey)}</span>)}
+                            {horizontal && <span style={{ fontSize: '0.7em', padding: '1px 7px', borderRadius: 8, background: 'var(--accent)', color: '#fff' }}>{t('ep_horizontal_badge')}</span>}
                           </div>
                         )}
                       </button>
@@ -159,7 +156,7 @@ export function EclipsePanel() {
               <Detail row={current} onBack={() => setSel(null)} />
             )}
             <div style={{ fontSize: '0.72em', opacity: 0.55, padding: '2px 4px' }}>
-              الأزمنة بتوقيت جهازك (والتوقيت العالمي بجانبها). المحاكاة بمكتبة astronomy-engine؛ وقد يختلف التقدير عن جداول ناسا بأجزاء من المئة في القدر وبثوانٍ في الأزمنة.
+              {t('ep_footnote')}
             </div>
           </div>
         </Flyout>
@@ -169,23 +166,24 @@ export function EclipsePanel() {
 }
 
 function Detail({ row, onBack }: { row: Row; onBack: () => void }) {
+  const { t } = useI18n();
   const e = row.event;
   const solar = e.type === 'solar';
   const focus = useSimulationStore((s) => s.eclipseFocus);
   return (
     <div style={{ display: 'grid', gap: 10 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-        <button className="clear-btn" onClick={onBack} style={{ width: 'auto', padding: '4px 10px' }}>‹ القائمة</button>
-        <div style={{ textAlign: 'left' }}>
-          <div style={{ fontWeight: 600 }}>{eclipseTitleAr(e)}</div>
-          <div style={{ fontSize: '0.78em', opacity: 0.75 }}>{fmtDate(e.peak)} · سلسلة ساروس {sarosSeries(e.peak, solar ? 'solar' : 'lunar')}</div>
+        <button className="clear-btn" onClick={onBack} style={{ width: 'auto', padding: '4px 10px' }}>{t('ep_back')}</button>
+        <div style={{ textAlign: 'end' }}>
+          <div style={{ fontWeight: 600 }}>{eclipseTitle(e)}</div>
+          <div style={{ fontSize: '0.78em', opacity: 0.75 }}>{fmtDate(e.peak)} · {t('saros')} {sarosSeries(e.peak, solar ? 'solar' : 'lunar')}</div>
         </div>
       </div>
       {solar
         ? <SolarDetails e={e as SolarEclipseEvent} loc={row.solar ?? null} />
         : <LunarDetails e={e as LunarEclipseEvent} loc={row.lunar} />}
       {focus && (
-        <button className="clear-btn" onClick={() => useSimulationStore.getState().setEclipseFocus(null)}>إخفاء مسار الحدث من الخريطة</button>
+        <button className="clear-btn" onClick={() => useSimulationStore.getState().setEclipseFocus(null)}>{t('ep_hide_path')}</button>
       )}
     </div>
   );
@@ -201,34 +199,36 @@ function ContactBtn({ label, time, extra }: { label: string; time: Date; extra?:
 }
 
 function SolarDetails({ e, loc }: { e: SolarEclipseEvent; loc: LocalSolarCircumstances | null }) {
+  const { t } = useI18n();
+  const dur = (sec: number) => t('dur_fmt', { m: Math.floor(sec / 60), s: Math.round(sec % 60) });
   const setObserver = useSimulationStore((s) => s.setObserver);
   const contacts: [string, { time: Date; altitudeDeg: number } | undefined][] = loc ? [
-    ['بداية الكسوف الجزئي (C1)', loc.c1],
-    ['بداية الكلي/الحلقي (C2)', loc.c2],
-    ['أعظم كسوف', loc.max],
-    ['نهاية الكلي/الحلقي (C3)', loc.c3],
-    ['نهاية الكسوف الجزئي (C4)', loc.c4],
+    [t('ep_s_c1'), loc.c1],
+    [t('ep_s_c2'), loc.c2],
+    [t('ep_s_max'), loc.max],
+    [t('ep_s_c3'), loc.c3],
+    [t('ep_s_c4'), loc.c4],
   ] : [];
   return (
     <>
       <div style={css.card}>
-        <div style={css.h}>الحدث عالمياً</div>
-        <KV k="أعظم كسوف" v={`${fmtUT(e.peak)} UT`} />
-        <KV k="القدر" v={Number.isFinite(e.magnitude) ? e.magnitude.toFixed(4) : '—'} />
+        <div style={css.h}>{t('ep_global')}</div>
+        <KV k={t('ep_s_max')} v={`${fmtUT(e.peak)} UT`} />
+        <KV k={t('ep_mag')} v={Number.isFinite(e.magnitude) ? e.magnitude.toFixed(4) : '—'} />
         <KV k="γ" v={e.gamma.toFixed(4)} />
-        {e.greatestDurationSec ? <KV k="أطول مدة" v={`${Math.floor(e.greatestDurationSec / 60)}د ${Math.round(e.greatestDurationSec % 60)}ث`} /> : null}
-        <KV k="نقطة أعظم كسوف" v={`${e.greatest.latDeg.toFixed(2)}°، ${e.greatest.lonDeg.toFixed(2)}°`} />
-        {!e.central && e.kind !== 'partial' ? <KV k="ملاحظة" v="كسوف غير مركزي" /> : null}
+        {e.greatestDurationSec ? <KV k={t('ep_longest')} v={dur(e.greatestDurationSec)} /> : null}
+        <KV k={t('ep_greatest_point')} v={`${e.greatest.latDeg.toFixed(2)}°, ${e.greatest.lonDeg.toFixed(2)}°`} />
+        {!e.central && e.kind !== 'partial' ? <KV k={t('ep_note')} v={t('ep_noncentral_note')} /> : null}
       </div>
 
       <div style={css.card}>
-        <div style={css.h}>من موقعك</div>
+        <div style={css.h}>{t('ep_here')}</div>
         {loc ? (
           <>
-            <KV k="النوع" v={loc.kind === 'total' ? 'كلي' : loc.kind === 'annular' ? 'حلقي' : 'جزئي'} />
-            <KV k="القدر" v={loc.magnitude.toFixed(3)} />
-            <KV k="نسبة القرص المظلم" v={`${(loc.obscuration * 100).toFixed(1)}%`} />
-            {loc.centralDurationSec ? <KV k="مدة المركزي" v={`${Math.floor(loc.centralDurationSec / 60)}د ${Math.round(loc.centralDurationSec % 60)}ث`} /> : null}
+            <KV k={t('ep_type')} v={t(loc.kind === 'total' ? 'ecl_total' : loc.kind === 'annular' ? 'ecl_annular' : 'ecl_partial')} />
+            <KV k={t('ep_mag')} v={loc.magnitude.toFixed(3)} />
+            <KV k={t('ecl_obsc')} v={`${(loc.obscuration * 100).toFixed(1)}%`} />
+            {loc.centralDurationSec ? <KV k={t('ep_central_dur')} v={dur(loc.centralDurationSec)} /> : null}
             <div style={{ display: 'grid', gap: 4, marginTop: 4 }}>
               {contacts.map(([label, p]) => p ? (
                 <ContactBtn key={label} label={label} time={p.time} extra={`${p.altitudeDeg.toFixed(0)}°`} />
@@ -237,7 +237,7 @@ function SolarDetails({ e, loc }: { e: SolarEclipseEvent; loc: LocalSolarCircums
           </>
         ) : (
           <div style={{ opacity: 0.75, fontSize: '0.84em' }}>
-            لا يُرى هذا الكسوف من موقعك. على الخريطة: النطاق الواسع منطقة الكسوف الجزئي، والشريط الضيّق مسار الكلي أو الحلقي.
+            {t('ep_not_visible_note')}
           </div>
         )}
       </div>
@@ -245,11 +245,11 @@ function SolarDetails({ e, loc }: { e: SolarEclipseEvent; loc: LocalSolarCircums
       <div style={{ display: 'grid', gap: 4 }}>
         {loc && (
           <button className="select-item" onClick={() => playFrom(new Date(loc.c1.time.getTime() - 5 * 60000))}>
-            <Play size={13} /> تشغيل الكسوف من موقعك
+            <Play size={13} /> {t('ep_play_solar')}
           </button>
         )}
         <button className="select-item" onClick={() => setObserver({ latitudeDeg: e.greatest.latDeg, longitudeDeg: e.greatest.lonDeg })}>
-          <Crosshair size={13} /> انقل موقعي إلى نقطة أعظم كسوف
+          <Crosshair size={13} /> {t('ep_move_greatest')}
         </button>
       </div>
 
@@ -259,37 +259,38 @@ function SolarDetails({ e, loc }: { e: SolarEclipseEvent; loc: LocalSolarCircums
 }
 
 function LunarDetails({ e, loc }: { e: LunarEclipseEvent; loc?: LocalLunarCircumstances }) {
+  const { t } = useI18n();
   return (
     <>
       <div style={css.card}>
-        <div style={css.h}>الحدث عالمياً</div>
-        <KV k="أعظم خسوف" v={`${fmtUT(e.peak)} UT`} />
-        <KV k="قدر الخسف" v={e.umbralMagnitude.toFixed(4)} />
-        <KV k="القدر الهامشي" v={e.penumbralMagnitude.toFixed(4)} />
+        <div style={css.h}>{t('ep_global')}</div>
+        <KV k={t('ep_c_MAX')} v={`${fmtUT(e.peak)} UT`} />
+        <KV k={t('ecl_mag_lunar')} v={e.umbralMagnitude.toFixed(4)} />
+        <KV k={t('ecl_mag_dim')} v={e.penumbralMagnitude.toFixed(4)} />
         <KV k="γ" v={e.gamma.toFixed(4)} />
       </div>
 
       <div style={css.card}>
-        <div style={css.h}>اللحظات من موقعك (اضغط للانتقال)</div>
+        <div style={css.h}>{t('ep_moments')}</div>
         {loc?.contacts.length ? (
           <div style={{ display: 'grid', gap: 4 }}>
             {loc.contacts.map((c) => (
-              <ContactBtn key={c.key} label={LUNAR_PHASE_AR[c.key]} time={c.time}
-                extra={c.moonUp ? `القمر ${c.moonAltDeg.toFixed(0)}°` : 'تحت الأفق'} />
+              <ContactBtn key={c.key} label={t(`ep_c_${c.key}` as TKey)} time={c.time}
+                extra={c.moonUp ? t('ep_moon_alt_inline', { alt: c.moonAltDeg.toFixed(0) }) : t('ep_below')} />
             ))}
           </div>
-        ) : <div style={{ opacity: 0.75, fontSize: '0.84em' }}>لا لحظات محسوبة لموقعك.</div>}
+        ) : <div style={{ opacity: 0.75, fontSize: '0.84em' }}>{t('ep_no_moments')}</div>}
         {loc?.horizontal && (
           <button className="select-item" style={{ fontSize: '0.84em' }}
             onClick={() => jumpTo(new Date((loc.horizontal!.start.getTime() + loc.horizontal!.end.getTime()) / 2))}>
-            <MapPin size={13} /> الخسوف المقلوب: {fmtTime(loc.horizontal.start, true)} – {fmtTime(loc.horizontal.end, true)}
-            {' '}· أقصى قدر خسف {loc.horizontal.maxUmbralMagnitude.toFixed(2)}
+            <MapPin size={13} /> {t('ep_horizontal_label')} {fmtTime(loc.horizontal.start, true)} – {fmtTime(loc.horizontal.end, true)}
+            {' '}· {t('ep_max_mag', { m: loc.horizontal.maxUmbralMagnitude.toFixed(2) })}
           </button>
         )}
       </div>
 
       <button className="select-item" onClick={() => playFrom(new Date(e.peak.getTime() - 3.5 * 3600 * 1000))}>
-        <Play size={13} /> تشغيل الخسوف
+        <Play size={13} /> {t('ep_play_lunar')}
       </button>
 
       <LiveView kind="lunar" />

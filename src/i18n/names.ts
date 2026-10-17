@@ -34,3 +34,16 @@ export const CITIES = [
   { id: 'c_newyork', lat: 40.7128, lon: -74.006 },
   { id: 'c_jakarta', lat: -6.2088, lon: 106.8456 },
 ] as const;
+
+/** اسم الكوكبة بلغة التطبيق (الإنجليزية إن توفر nameEn، وإلا العربية) */
+export function groupName(g: { nameAr: string; nameEn?: string | null }, lang: Lang): string {
+  return lang === 'en' && g.nameEn ? g.nameEn : g.nameAr;
+}
+
+/** أقمار المشتري الأربعة الكبرى */
+export const JUPITER_MOON_NAMES: Record<string, { ar: string; en: string }> = {
+  io: { ar: 'آيو', en: 'Io' },
+  europa: { ar: 'أوروبا', en: 'Europa' },
+  ganymede: { ar: 'غانيميد', en: 'Ganymede' },
+  callisto: { ar: 'كاليستو', en: 'Callisto' },
+};

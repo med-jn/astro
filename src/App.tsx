@@ -2,6 +2,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { SkyCanvas } from './components/SkyCanvas';
 import { ControlsPanel } from './components/ControlsPanel';
 import { InfoCard } from './components/InfoCard';
+import { ObserverView } from './components/ObserverView';
+import { GlobalShortcuts } from './components/GlobalShortcuts';
+import { useEyeStore } from './state/eye';
 import { loadStarCatalog, loadArabicEnrichment } from './core/starCatalog';
 import { loadZodiacData } from './core/zodiac';
 import { loadZodiacSigns } from './core/zodiacNamesAr';
@@ -13,6 +16,7 @@ export default function App() {
   // تحديث الحالة في كل إطار كان يعيد رسم التطبيق كله 60 مرة في الثانية.
   const [output, setOutput] = useState<RenderOutput | null>(null);
   const latest = useRef<RenderOutput | null>(null);
+  const eyeOpen = useEyeStore((s) => s.open);
   const onFrame = useCallback((o: RenderOutput) => { latest.current = o; }, []);
   useEffect(() => {
     const id = setInterval(() => setOutput((prev) => (latest.current && latest.current !== prev ? latest.current : prev)), 250);
@@ -30,8 +34,10 @@ export default function App() {
   return (
     <div className="app-root">
       <ControlsPanel />
+      <GlobalShortcuts />
       <div className="stage">
         <SkyCanvas onFrame={onFrame} />
+        {eyeOpen && <ObserverView onFrame={onFrame} />}
         <InfoCard output={output} />
       </div>
     </div>

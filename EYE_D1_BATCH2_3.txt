@@ -1,0 +1,10 @@
+الدفعتان 2+3 من D1 — واجهة «عين الراصد» (عين مجردة) موصولة بالتطبيق. انسخ فوق المشروع (بعد حزمة الدفعة 1).
+
+جديد   src/components/ObserverView.tsx
+معدَّل  src/components/ControlsPanel.tsx  (زر NavRow بأيقونة Eye بعد «قبة الراصد» + حالة فتح محلية + عرض المكوّن)
+معدَّل  src/components/SkyCanvas.tsx      (تخطي renderSky فقط عند وجود eye-view-open على body؛ الزمن يتقدّم)
+معدَّل  src/i18n/ar.ts, en.ts             (45 مفتاحاً جديداً: nav_eye, eye_* بالتساوي بين اللغتين)
+معدَّل  src/index.css                     (كتلة .eye-* في آخر الملف)
+معدَّل  tests/neutrality.test.ts          (استثناء ضيق: لفظ «ظل/shadow» وحده في مفاتيح eye_sd_ فقط)
+
+بعد النسخ: npm test  ثم  npm run dev  وافتح «عين الراصد» من القائمة.

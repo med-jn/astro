@@ -2,7 +2,7 @@ import { memo, useEffect, useState, type CSSProperties, type ElementType } from 
 import {
   Play, Pause, Clock, MapPinned, LocateFixed, Globe2, Contrast, Orbit, Route, Radar,
   CircleDot, Star, Disc, Tag, Compass, Sparkles, X, RotateCcw, Moon,
-  Grid3x3, Clock3, Telescope, Menu, Settings as SettingsIcon, Info,
+  Grid3x3, Clock3, Telescope, Eye, Menu, Settings as SettingsIcon, Info,
 } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 import { SPEED_LABELS_AR, useSimulationStore, type LayerToggles } from '../state/store';
@@ -18,6 +18,10 @@ import { StarSearchBar } from './StarSearchBar';
 import { Flyout, Segmented, Section, NavRow, SwitchRow, StepperRow, CoordField } from './ui';
 import { LookPicker } from './EclipseLiveView';
 import { EclipsePanel } from './EclipsePanel';
+import { useEyeStore, type LookKind } from '../state/eye';
+import { ShortcutsGuide } from './ShortcutsGuide';
+import { OPEN_SHORTCUTS_EVENT } from './GlobalShortcuts';
+import { fovLimits, type ProjectionKind } from '../core/camera';
 
 /* ------------------------------------------------------------------ */
 /*  ثوابت                                                               */
@@ -34,9 +38,16 @@ const LINE_KEYS: (keyof LayerToggles)[] = ['tropics', 'meridians', 'gridFull', '
 const GROUND_KEYS = [...SURFACE_KEYS, ...LINE_KEYS, 'timeZones'] as (keyof LayerToggles)[];
 const SKY_KEYS: (keyof LayerToggles)[] = ['stars', 'planets'];
 
+// عين الراصد: أوامر النظر والإسقاطات (الحالة في state/eye؛ الزمن والطبقات من المتجر الرئيسي)
+const EYE_LOOKS: [LookKind, TKey][] = [
+  ['sun', 'eye_sun'], ['moon', 'eye_moon'], ['north', 'eye_dir_n'], ['east', 'eye_dir_e'],
+  ['south', 'eye_dir_s'], ['west', 'eye_dir_w'], ['zenith', 'eye_look_zenith'], ['dial', 'eye_look_dial'],
+];
+const EYE_PROJECTIONS: ProjectionKind[] = ['stereographic', 'perspective', 'equidistant'];
+
 const JUMP_PHASES = [0, 90, 180, 270] as const; // محاق، تربيع أول، بدر، تربيع أخير
 
-type PopoverKey = 'time' | 'observer' | 'ground' | 'sky' | 'zodiac' | 'mansions' | 'settings' | null;
+type PopoverKey = 'eye' | 'time' | 'observer' | 'ground' | 'sky' | 'zodiac' | 'mansions' | 'settings' | null;
 type DateField = 'year' | 'month' | 'day' | 'hour' | 'minute';
 
 function addToDateField(date: Date, field: DateField, delta: number): Date {
@@ -72,7 +83,17 @@ function ControlsPanelImpl() {
     useShallow((s) => ({ isPlaying: s.isPlaying, speedIndex: s.speedIndex, observer: s.observer, layers: s.layers, timeZoneKind: s.timeZoneKind, selectedZodiacs: s.selectedZodiacs, selectedMansionIndices: s.selectedMansionIndices, setDate: s.setDate, togglePlay: s.togglePlay, resetToNow: s.resetToNow, setSpeedIndex: s.setSpeedIndex, setObserver: s.setObserver, toggleLayer: s.toggleLayer, toggleZodiacSelection: s.toggleZodiacSelection, clearZodiacSelection: s.clearZodiacSelection, toggleMansionSelection: s.toggleMansionSelection, clearMansionSelection: s.clearMansionSelection, setTimeZoneKind: s.setTimeZoneKind, auroraKp: s.auroraKp, setAuroraKp: s.setAuroraKp })),
   );
 
+  const eye = useEyeStore(useShallow((s) => ({ open: s.open, projection: s.projection, ground: s.ground, sundial: s.sundial, altAzGrid: s.altAzGrid, fovDeg: s.fovDeg })));
+  const [fovLo, fovHi] = fovLimits(eye.projection);
+
   const closeAll = () => { setOpenPopover(null); };
+
+  // ؟ أو F1: تفتح صفحة الإعدادات عند إرشادات الاختصارات
+  useEffect(() => {
+    const open = () => { setDrawerOpen(true); setOpenPopover('settings'); };
+    window.addEventListener(OPEN_SHORTCUTS_EVENT, open);
+    return () => window.removeEventListener(OPEN_SHORTCUTS_EVENT, open);
+  }, []);
 
   // Escape: يغلق النافذة المنبثقة أولاً، ثم الدرج
   useEffect(() => {
@@ -293,6 +314,41 @@ function ControlsPanelImpl() {
               <NavRow icon={Telescope} title={t('nav_dome')} hint={t(layers.observerDome ? 'hint_on' : 'hint_off')}
                 switchState={layers.observerDome} onClick={() => toggleLayer('observerDome')} />
             </div>
+
+            <div className="icon-item">
+              <NavRow icon={Eye} title={t('nav_eye')} hint={t(eye.open ? 'hint_on' : 'nav_eye_hint')} badge={eye.open}
+                active={openPopover === 'eye'} onClick={() => { if (!eye.open) useEyeStore.getState().setOpen(true); toggle('eye'); }} />
+              {openPopover === 'eye' && (
+                <Flyout icon={Eye} title={t('nav_eye')} onClose={closeAll}>
+                  <SwitchRow icon={Eye} label={t('eye_view_on')} checked={eye.open} onChange={() => useEyeStore.getState().setOpen(!eye.open)} />
+                  {eye.open && (
+                    <>
+                      <Section title={t('eye_look')}>
+                        <div className="eye-chips">
+                          {EYE_LOOKS.map(([k, label]) => (
+                            <button key={k} className="eye-btn" onClick={() => useEyeStore.getState().look(k)}>{t(label)}</button>
+                          ))}
+                        </div>
+                      </Section>
+                      <Section title={t('eye_projection')}>
+                        <Segmented<ProjectionKind> label={t('eye_projection')} value={eye.projection} onChange={(p) => useEyeStore.getState().setProjection(p)}
+                          options={EYE_PROJECTIONS.map((p) => ({ value: p, label: t(`eye_proj_${p}` as TKey) }))} />
+                      </Section>
+                      <Section title={`${t('eye_fov')} · ${eye.fovDeg.toFixed(eye.fovDeg < 10 ? 2 : 1)}°`}>
+                        <input type="range" className="eye-range" min={0} max={1000} aria-label={t('eye_fov')}
+                          value={Math.round((Math.log(eye.fovDeg / fovLo) / Math.log(fovHi / fovLo)) * 1000)}
+                          onChange={(e: { target: { value: string } }) => useEyeStore.getState().setFov(fovLo * Math.pow(fovHi / fovLo, Number(e.target.value) / 1000))} />
+                      </Section>
+                      <Section title={t('eye_layers')}>
+                        <SwitchRow icon={Globe2} label={t('eye_opt_ground')} checked={eye.ground} onChange={() => useEyeStore.getState().toggle('ground')} />
+                        <SwitchRow icon={Clock} label={t('eye_opt_sundial')} checked={eye.sundial} onChange={() => useEyeStore.getState().toggle('sundial')} />
+                        <SwitchRow icon={Grid3x3} label={t('eye_opt_grid')} checked={eye.altAzGrid} onChange={() => useEyeStore.getState().toggle('altAzGrid')} />
+                      </Section>
+                    </>
+                  )}
+                </Flyout>
+              )}
+            </div>
           </div>
 
           {/* ===== طبقات العرض ===== */}
@@ -416,6 +472,9 @@ function ControlsPanelImpl() {
                 <Segmented<'decimal' | 'dms'> label={t('set_coords')} value={settings.coordFormat}
                   onChange={(v) => updateSettings({ coordFormat: v })}
                   options={[{ value: 'decimal', label: t('set_decimal') }, { value: 'dms', label: t('set_dms') }]} />
+              </Section>
+              <Section title={t('set_shortcuts')}>
+                <ShortcutsGuide />
               </Section>
               <button className="btn-wide" onClick={resetSettings}><RotateCcw size={16} /> {t('set_reset')}</button>
             </Flyout>

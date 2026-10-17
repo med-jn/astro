@@ -1,0 +1,10 @@
+الدفعة 1 من D1 — وصل محرك «عين الراصد» بنسخة astro-main. انسخ فوق المشروع بالمسارات نفسها.
+
+جديد   src/core/camera.ts        (كاميرا افتراضية + ثلاثة إسقاطات + سحب/تكبير)
+جديد   src/core/sundial.ts       (ظل العمود، منحنى طرف الظل، الزمن الشمسي)
+جديد   src/render/eyeRenderer.ts (renderEye)
+معدَّل  src/render/domeSky.ts     (استخراج ensureSkyTables/skyLinearAt/toDisplayRGB — بقية الملف كما في main)
+معدَّل  src/render/skyRenderer.ts (كلمة export فقط: drawMoon, drawPlanetDot)
+معدَّل  src/render/observerDome.ts(كلمة export فقط: paintDomeSun)
+
+لا تغيير في الواجهة ولا في السلوك؛ المحرك غير موصول بعد (الدفعتان 2 و3).

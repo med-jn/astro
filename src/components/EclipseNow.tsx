@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { Moon, Sun } from 'lucide-react';
 import { useSimulationStore } from '../state/store';
 import { jumpTo } from '../state/jump';
-import { eclipseTitleAr, findEclipsesBetween, lunarViewAt, solarViewAt, type EclipseEvent } from '../core/eclipses';
+import { eclipseTitle, findEclipsesBetween, lunarViewAt, solarViewAt, type EclipseEvent } from '../core/eclipses';
 import { fmtDateLong, useI18n, type TKey } from '../i18n';
 import { useSimDate } from '../hooks';
 import { LiveView } from './EclipseLiveView';
@@ -55,7 +55,7 @@ export function EclipseNow() {
           <li key={e.peak.getTime()} className="event-row">
             {e.type === 'solar' ? <Sun size={18} /> : <Moon size={18} />}
             <span className="event-main">
-              <span className="event-title">{eclipseTitleAr(e)}</span>
+              <span className="event-title">{eclipseTitle(e)}</span>
               <span className="event-sub num">{fmtDateLong(e.peak, locale.date)} · {t('saros')} {sarosSeries(e.peak, e.type === 'solar' ? 'solar' : 'lunar')}</span>
             </span>
             <button className="chip-btn" onClick={() => jumpTo(e.peak)}>{t('ecl_go_peak')}</button>

@@ -35,6 +35,11 @@ function applyToDocument(lang: Lang) {
 }
 applyToDocument(current);
 
+/** اللغة الحالية خارج React (للرسم على الكانفاس ودوال النواة) */
+export const getLang = (): Lang => current;
+/** إعدادات Intl للغة الحالية خارج React */
+export const currentLocale = () => LOCALES[current];
+
 export function setLang(lang: Lang) {
   if (lang === current) return;
   current = lang;
@@ -52,6 +57,9 @@ export function translate(lang: Lang, key: TKey, params?: Record<string, string 
   if (params) for (const [k, v] of Object.entries(params)) s = s.split(`{${k}}`).join(String(v));
   return s;
 }
+
+/** ترجمة فورية بلغة التطبيق الحالية، لدوال لا تعمل داخل مكوّنات React */
+export const tr = (key: TKey, params?: Record<string, string | number>): string => translate(current, key, params);
 
 const subscribe = (cb: () => void) => {
   listeners.add(cb);

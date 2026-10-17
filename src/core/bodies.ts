@@ -17,6 +17,8 @@ export const PLANET_NAMES: PlanetName[] = [
 ];
 
 // أسماء الكواكب بالعربية للعرض في الواجهة
+import { getLang } from '../i18n';
+
 export const PLANET_LABELS_AR: Record<PlanetName, string> = {
   Mercury: 'عطارد',
   Venus: 'الزهرة',
@@ -26,6 +28,10 @@ export const PLANET_LABELS_AR: Record<PlanetName, string> = {
   Uranus: 'أورانوس',
   Neptune: 'نبتون',
 };
+
+/** اسم الكوكب بلغة التطبيق الحالية (الإنجليزية: الاسم كما في astronomy-engine) */
+export const planetLabel = (name: string): string =>
+  getLang() === 'en' ? name : PLANET_LABELS_AR[name as PlanetName] ?? name;
 
 // ألوان تقريبية واقعية لكل جرم للرسم
 export const PLANET_COLORS: Record<PlanetName, string> = {

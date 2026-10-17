@@ -11,10 +11,14 @@ const AR_BANNED = /(?<![\u0621-\u064A])(?:[وفبكل]?ال|لل)?ظل(?![\u0621
 const AR_BANNED_STRICT = /(?<![\u0621-\u064A])(?:[وفبكل]?ال|لل)?ظل(?![\u0621-\u064A])|حجب|احتجاب|محجوب|بركان|ثوران/;
 const EN_BANNED = /\bshadow|\bumbra|\bpenumbra|occult|eclipsed by|volcan|eruption|blocks? the|covers? the/i;
 
+/** استثناء ضيق: «ظل العمود» اسم صحيح في الساعة الشمسية؛ يُحذف لفظ الظل وحده من مفاتيح eye_sd_ ثم تسري بقية المحظورات عليها. */
+const sundialOk = (k: string, v: string, lang: 'ar' | 'en') =>
+  k.startsWith('eye_sd_') ? v.replace(lang === 'ar' ? /(?<![\u0621-\u064A])(?:[وفبكل]?ال|لل)?ظل(?![\u0621-\u064A])/g : /\bshadow/gi, '') : v;
+
 describe('الحياد في نصوص الواجهة', () => {
   it('القاموسان العربي والإنجليزي', () => {
-    for (const [k, v] of Object.entries(ar)) expect(AR_BANNED_STRICT.test(v), `ar.${k}: ${v}`).toBe(false);
-    for (const [k, v] of Object.entries(en)) expect(EN_BANNED.test(v), `en.${k}: ${v}`).toBe(false);
+    for (const [k, v] of Object.entries(ar)) expect(AR_BANNED_STRICT.test(sundialOk(k, v, 'ar')), `ar.${k}: ${v}`).toBe(false);
+    for (const [k, v] of Object.entries(en)) expect(EN_BANNED.test(sundialOk(k, v, 'en')), `en.${k}: ${v}`).toBe(false);
   });
 
   it('النصوص الحرفية ونصوص JSX في الكود', () => {

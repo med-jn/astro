@@ -174,11 +174,11 @@ function sampleTab(tab: Float32Array, e: number, d: number, scale: number, out: 
   }
 }
 
-/** صورة السماء الجاهزة (شمال أعلى، شرق يميناً، قرص الأفق يملأ المربع) — تُرسم بمصفوفة تحويل القبة */
-export function getDomeSkyCanvas(inp: DomeSkyInput, nowMs: number): HTMLCanvasElement {
-  if (!canvas) { canvas = document.createElement('canvas'); canvas.width = canvas.height = SZ; image = new ImageData(SZ, SZ); }
-  ensureGeometry();
-
+/**
+ * يجهّز جداول الإشعاع للشمس والقمر (يُعاد بناؤها عند تغيّر محسوس وبحدّ زمني) ويعيد رقم نسخة تتغير عند إعادة البناء.
+ * مشتركة بين القبة وعين الراصد: كلتاهما تقرأ الجداول عبر skyLinearAt.
+ */
+export function ensureSkyTables(inp: DomeSkyInput, nowMs: number): number {
   const sunGeom = inp.sunAlt - refractionDeg(Math.max(inp.sunAlt, -1));
   const moonGeom = inp.moonAlt - refractionDeg(Math.max(inp.moonAlt, -1));
   const needSun = sunGeom > -22;
@@ -193,6 +193,42 @@ export function getDomeSkyCanvas(inp: DomeSkyInput, nowMs: number): HTMLCanvasEl
     if (needMoon) { moonTab = buildMoonTable(moonGeom, inp.moonPhase); moonTabKey = moonKey; } else { moonTab = null; moonTabKey = ''; }
     tabStamp = nowMs; tabVersion++;
   }
+  return tabVersion;
+}
+
+/** إشعاع خطي (cd/m²، ثلاث قنوات) لاتجاه (ارتفاع e، سمت az) — بعد ensureSkyTables */
+export function skyLinearAt(e: number, az: number, sunAz: number, moonAz: number, sunFraction: number, out: number[]): void {
+  const nf = NIGHT_Y * (1 + 0.8 * Math.exp(-e / 12));
+  out[0] = nf * NIGHT_RGB[0]; out[1] = nf * NIGHT_RGB[1]; out[2] = nf * NIGHT_RGB[2];
+  if (sunTab) {
+    let d = Math.abs(az - sunAz); d %= 360; if (d > 180) d = 360 - d;
+    sampleTab(sunTab, e, d, Math.max(0, Math.min(1, sunFraction)), out);
+  }
+  if (moonTab) {
+    let d = Math.abs(az - moonAz); d %= 360; if (d > 180) d = 360 - d;
+    sampleTab(moonTab, e, d, 1, out);
+  }
+}
+
+/** إشعاع خطي → بايتات sRGB (RGBA) عند الإزاحة off: تعيين لوغاريتمي للسطوع مع حفظ اللون */
+export function toDisplayRGB(acc: number[], px: Uint8ClampedArray | Uint8Array, off: number): void {
+  const y = Math.max(1e-9, lumY(acc));
+  const L = displayLevel(y);
+  let cr = Math.pow(acc[0] / y, 0.85), cg = Math.pow(acc[1] / y, 0.85), cb = Math.pow(acc[2] / y, 0.85);
+  const cy = lumY([cr, cg, cb]); cr /= cy; cg /= cy; cb /= cy;
+  const boost = 1 + 0.45 * smooth(150, 1500, y) - 0.5 * smooth(8000, 60000, y);
+  let r = 1 + (cr - 1) * boost, g = 1 + (cg - 1) * boost, b = 1 + (cb - 1) * boost;
+  r = Math.max(0, r) * L; g = Math.max(0, g) * L; b = Math.max(0, b) * L;
+  const m = Math.max(r, g, b);
+  if (m > 1) { const s = 1 / m; r *= s; g *= s; b *= s; }
+  px[off] = enc(r); px[off + 1] = enc(g); px[off + 2] = enc(b); px[off + 3] = 255;
+}
+
+/** صورة السماء الجاهزة (شمال أعلى، شرق يميناً، قرص الأفق يملأ المربع) — تُرسم بمصفوفة تحويل القبة */
+export function getDomeSkyCanvas(inp: DomeSkyInput, nowMs: number): HTMLCanvasElement {
+  if (!canvas) { canvas = document.createElement('canvas'); canvas.width = canvas.height = SZ; image = new ImageData(SZ, SZ); }
+  ensureGeometry();
+  ensureSkyTables(inp, nowMs);
 
   const key = `${tabVersion}|${Math.round(inp.sunAz / 0.15)}|${Math.round(inp.moonAz / 0.3)}|${Math.round(inp.sunFraction * 100)}`;
   if (key === imageKey) return canvas;
@@ -200,36 +236,11 @@ export function getDomeSkyCanvas(inp: DomeSkyInput, nowMs: number): HTMLCanvasEl
 
   const px = image!.data;
   const acc = [0, 0, 0];
-  const sunFrac = Math.max(0, Math.min(1, inp.sunFraction));
   for (let k = 0; k < SZ * SZ; k++) {
     const e = geomE![k];
     if (e < 0) { px[k * 4 + 3] = 0; continue; }
-    const az = geomAz![k];
-    // سماء الليل الطبيعية: توهّج الغلاف الليلي يزداد قرب الأفق
-    const nf = NIGHT_Y * (1 + 0.8 * Math.exp(-e / 12));
-    acc[0] = nf * NIGHT_RGB[0]; acc[1] = nf * NIGHT_RGB[1]; acc[2] = nf * NIGHT_RGB[2];
-    if (sunTab) {
-      let d = Math.abs(az - inp.sunAz); if (d > 180) d = 360 - d;
-      sampleTab(sunTab, e, d, sunFrac, acc);
-    }
-    if (moonTab) {
-      let d = Math.abs(az - inp.moonAz); if (d > 180) d = 360 - d;
-      sampleTab(moonTab, e, d, 1, acc);
-    }
-    const y = Math.max(1e-9, lumY(acc));
-    const L = displayLevel(y);
-    // لون مُحافَظ عليه (نسب القنوات) مع تلطيف التشبّع عند السطوع العالي (اتساع تكيّف العين)
-    // ضغط التطرف اللوني (الحمرة الحادة عند الأفق): الهباء والتشتت المتعدد يملآن الألوان في الواقع بما لا يحسبه التشتت الأحادي
-    let cr = Math.pow(acc[0] / y, 0.85), cg = Math.pow(acc[1] / y, 0.85), cb = Math.pow(acc[2] / y, 0.85);
-    const cy = lumY([cr, cg, cb]); cr /= cy; cg /= cy; cb /= cy;
-    // سماء النهار أكثر تشبّعاً (أزرق رايلي عميق)، وفي أشد السطوع (هالة الشمس) تبيضّ
-    const boost = 1 + 0.45 * smooth(150, 1500, y) - 0.5 * smooth(8000, 60000, y);
-    let r = 1 + (cr - 1) * boost, g = 1 + (cg - 1) * boost, b = 1 + (cb - 1) * boost;
-    r = Math.max(0, r); g = Math.max(0, g); b = Math.max(0, b);
-    r *= L; g *= L; b *= L;
-    const m = Math.max(r, g, b);
-    if (m > 1) { const s = 1 / m; r *= s; g *= s; b *= s; }
-    px[k * 4] = enc(r); px[k * 4 + 1] = enc(g); px[k * 4 + 2] = enc(b); px[k * 4 + 3] = 255;
+    skyLinearAt(e, geomAz![k], inp.sunAz, inp.moonAz, inp.sunFraction, acc);
+    toDisplayRGB(acc, px, k * 4);
   }
   canvas.getContext('2d')!.putImageData(image!, 0, 0);
   return canvas;

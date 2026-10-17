@@ -1,6 +1,10 @@
+import { getLang } from '../i18n';
+
 export interface CelestialContentEntry {
   nameAr: string;
+  nameEn?: string;
   description?: string;
+  descriptionEn?: string;
   /** مسار نسبي داخل public/audio/، مثلاً '/audio/sun.mp3'. اختياري تماماً. */
   audioUrl?: string;
 }
@@ -17,10 +21,14 @@ export interface CelestialContentEntry {
 export const CELESTIAL_CONTENT: Record<string, CelestialContentEntry> = {
   sun: {
     nameAr: 'الشمس',
+    nameEn: 'Sun',
+    descriptionEn: 'The Sun completes a full daily cycle about every 24 hours and moves along its path in the sky (the elliptical orbit) over the year.',
     description: 'الشمس تكمل دورة يومية كاملة كل نحو 24 ساعة، وتتحرك على طول مسارها في السماء (المدار الإهليجي) خلال السنة.',
   },
   moon: {
     nameAr: 'القمر',
+    nameEn: 'Moon',
+    descriptionEn: 'The Moon completes its full cycle of phases about every 29.5 days.',
     description: 'القمر يكمل دورة أطواره الكاملة كل نحو 29.5 يوماً.',
   },
   // مثال توضيحي فقط لطريقة ربط مقطع صوتي مستقبلاً — الملف نفسه غير موجود بعد:
@@ -36,3 +44,8 @@ export function getContentId(kind: 'sun' | 'moon' | 'planet' | 'star' | 'observe
 export function getContent(id: string): CelestialContentEntry | undefined {
   return CELESTIAL_CONTENT[id];
 }
+
+/** الاسم بلغة التطبيق؛ بلا اسم إنجليزي مسجَّل يعيد undefined فيستعمل المستدعي اسماً بديلاً */
+export const contentName = (e: CelestialContentEntry): string | undefined => (getLang() === 'en' ? e.nameEn : e.nameAr);
+export const contentDescription = (e: CelestialContentEntry): string | undefined =>
+  getLang() === 'en' ? e.descriptionEn : e.description;

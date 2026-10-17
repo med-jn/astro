@@ -17,7 +17,7 @@ import {
   getSunState,
   getMoonState,
   PLANET_COLORS,
-  PLANET_LABELS_AR,
+  planetLabel,
 } from '../core/bodies';
 import { getLoadedStars, getStarColor, getStarRadiusPx, getStarDisplayName, getStarByIdMap } from '../core/starCatalog';
 import { getLoadedZodiac, type ZodiacKey } from '../core/zodiac';
@@ -31,7 +31,9 @@ import { drawGeoGrid, drawNominalTimeZones, TIMEZONE_COLOR } from './geoGrid';
 import { drawNightShadingSmooth } from './nightShade';
 import { drawObserverDome, type DomeTarget } from './observerDome';
 import { fillTextUpright, labelGap, setSceneRotationRad } from './uprightText';
-import { getContent, getContentId } from '../core/contentRegistry';
+import { getContent, getContentId, contentName, contentDescription } from '../core/contentRegistry';
+import { getLang, tr, type TKey } from '../i18n';
+import { mansionName, groupName, JUPITER_MOON_NAMES } from '../i18n/names';
 import { drawEclipseGround, drawEclipseOnMapMoon, angSepDeg, moonTextureOrientation, type EclipseFocus } from './eclipseOverlay';
 import { getMoonImage, MOON_IMAGE_ROTATION_CCW_DEG } from './bodyImages';
 import { moonPoleAngleDeg } from '../core/eclipses';
@@ -315,9 +317,9 @@ function drawEarthMap(ctx: CanvasRenderingContext2D, config: PolarMapConfig) {
 
 /** ثلاث درجات محايدة (فاتح/برونزي/رمادي فولاذي) بدل ثلاثة ألوان أساسية صاخبة — تمايز بالإضاءة لا بالصبغة */
 const TROPIC_STYLES: { lat: number; color: string; label: string }[] = [
-  { lat: TROPIC_OBLIQUITY, color: '#b08d57', label: 'مدار السرطان' },
-  { lat: 0, color: '#d8dde3', label: 'خط الاستواء' },
-  { lat: -TROPIC_OBLIQUITY, color: '#7c95a8', label: 'مدار الجدي' },
+  { lat: TROPIC_OBLIQUITY, color: '#b08d57', label: 'tropic_cancer' },
+  { lat: 0, color: '#d8dde3', label: 'equator' },
+  { lat: -TROPIC_OBLIQUITY, color: '#7c95a8', label: 'tropic_capricorn' },
 ];
 
 function drawTropics(ctx: CanvasRenderingContext2D, config: PolarMapConfig, showLabels: boolean, zoomScale: number) {
@@ -335,7 +337,7 @@ function drawTropics(ctx: CanvasRenderingContext2D, config: PolarMapConfig, show
       ctx.fillStyle = color;
       ctx.font = `bold ${9 * zoomScale}px system-ui, sans-serif`;
       ctx.textAlign = 'left';
-      fillTextUpright(ctx, label, config.centerX, config.centerY - r, 8, -(5 + 2 * zoomScale));
+      fillTextUpright(ctx, tr(label as TKey), config.centerX, config.centerY - r, 8, -(5 + 2 * zoomScale));
     }
   });
   ctx.globalAlpha = 1;
@@ -397,7 +399,7 @@ function drawLunarMansions(
     ctx.font = `bold ${10 * zoomScale}px system-ui, sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    fillTextUpright(ctx, mansion.nameAr, p.x, p.y);
+    fillTextUpright(ctx, mansionName(mansion, getLang()), p.x, p.y);
   });
   ctx.restore();
 }
@@ -436,7 +438,7 @@ function drawSelectedMansions(
       ctx.font = `bold ${12 * zoomScale}px system-ui, sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      fillTextUpright(ctx, mansion.nameAr, p.x, p.y, 0, -(14 * zoomScale + 6));
+      fillTextUpright(ctx, mansionName(mansion, getLang()), p.x, p.y, 0, -(14 * zoomScale + 6));
     }
   });
   ctx.restore();
@@ -602,7 +604,7 @@ function drawOneGroup(ctx: CanvasRenderingContext2D, groupId: number, gmstDeg: n
       ctx.font = `bold ${12 * zoomScale}px system-ui, sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      fillTextUpright(ctx, group.nameAr, p.x, p.y);
+      fillTextUpright(ctx, groupName(group, getLang()), p.x, p.y);
       ctx.restore();
     }
   }
@@ -643,7 +645,7 @@ function drawSelectedGroups(ctx: CanvasRenderingContext2D, groupIds: number[], g
 // ============================= الكواكب: الرسم الأساسي =============================
 
 /** نقطة الكوكب البسيطة (كل الكواكب عدا زحل الذي له رسم خاص بالحلقات) */
-function drawPlanetDot(ctx: CanvasRenderingContext2D, p: ProjectedPoint2D, r: number, color: string, zoomScale: number) {
+export function drawPlanetDot(ctx: CanvasRenderingContext2D, p: ProjectedPoint2D, r: number, color: string, zoomScale: number) {
   ctx.save();
   ctx.fillStyle = color;
   ctx.shadowColor = color;
@@ -800,11 +802,11 @@ function drawSaturnWithRings(
 // ============================= أقمار المشتري الأربعة الكبرى =============================
 
 /** قدر ظاهري تقريبي عند التقابل — تفاوت الأقمار الفعلي عادة أقل من نصف قدر فلا يغيّر نتيجة اختبار الرؤية بالعين المجردة */
-const GALILEAN_MOONS: { key: 'io' | 'europa' | 'ganymede' | 'callisto'; nameAr: string; approxMag: number }[] = [
-  { key: 'io', nameAr: 'آيو', approxMag: 5.0 },
-  { key: 'europa', nameAr: 'أوروبا', approxMag: 5.3 },
-  { key: 'ganymede', nameAr: 'غانيميد', approxMag: 4.6 },
-  { key: 'callisto', nameAr: 'كاليستو', approxMag: 5.7 },
+const GALILEAN_MOONS: { key: 'io' | 'europa' | 'ganymede' | 'callisto'; approxMag: number }[] = [
+  { key: 'io', approxMag: 5.0 },
+  { key: 'europa', approxMag: 5.3 },
+  { key: 'ganymede', approxMag: 4.6 },
+  { key: 'callisto', approxMag: 5.7 },
 ];
 
 /** حد رؤية العين المجردة المُعتمَد في هذا التطبيق (مطابق لتصفية كتالوج النجوم نفسه: mag <= 6.5) */
@@ -860,7 +862,7 @@ function drawJupiterMoons(
       ctx.font = `${8 * zoomScale}px system-ui, sans-serif`;
       ctx.fillStyle = 'rgba(220,214,198,0.85)';
       ctx.textAlign = 'center';
-      fillTextUpright(ctx, m.nameAr, p.x, p.y, 0, -labelGap(Math.max(0.9, 1.1 * zoomScale), zoomScale));
+      fillTextUpright(ctx, JUPITER_MOON_NAMES[m.key][getLang()], p.x, p.y, 0, -labelGap(Math.max(0.9, 1.1 * zoomScale), zoomScale));
     }
   });
   ctx.restore();
@@ -901,7 +903,7 @@ function drawPlanets(
       const bodyR = name === 'Saturn' ? r * 2.4 : r + 4 * zoomScale; // 4 = وهج النقطة
       const prevAlign = ctx.textAlign;
       ctx.textAlign = 'center';
-      fillTextUpright(ctx, PLANET_LABELS_AR[name as keyof typeof PLANET_LABELS_AR] ?? name, p.x, p.y, 0, -(bodyR + 3 * zoomScale));
+      fillTextUpright(ctx, planetLabel(name), p.x, p.y, 0, -(bodyR + 3 * zoomScale));
       ctx.textAlign = prevAlign;
     }
 
@@ -941,7 +943,7 @@ const MOON_MARIA: { dx: number; dy: number; r: number; alpha: number }[] = [
   { dx: -0.05, dy: -0.02, r: 0.14, alpha: 0.1 },
 ];
 
-function drawMoon(
+export function drawMoon(
   ctx: CanvasRenderingContext2D, moon: CelestialBodyState, moonP: ProjectedPoint2D, sunP: ProjectedPoint2D, radiusPx: number,
   tex?: { rotRad: number; mirror: boolean }, haloScale = 1, opaqueDark = false
 ) {
@@ -1056,7 +1058,7 @@ function drawObserverMarker(ctx: CanvasRenderingContext2D, observer: ObserverLoc
   if (showLabels) {
     ctx.font = `${10 * zoomScale}px system-ui, sans-serif`;
     ctx.fillStyle = '#d99b90';
-    fillTextUpright(ctx, 'موقعي', p.x, p.y, labelGap(4 * zoomScale, zoomScale), 3);
+    fillTextUpright(ctx, tr('layer_observerMarker'), p.x, p.y, labelGap(4 * zoomScale, zoomScale), 3);
   }
   ctx.restore();
 }
@@ -1089,31 +1091,31 @@ function collectHitTargets(
     const content = getContent(getContentId('sun', 'sun'));
     const screen = project(sunP);
     targets.push({
-      x: screen.x, y: screen.y, name: content?.nameAr ?? 'الشمس',
-      detail: `ميل ${sun.equatorial.declinationDeg.toFixed(1)}° · م.م ${sun.equatorial.rightAscensionHours.toFixed(2)}س`,
-      description: content?.description, audioUrl: content?.audioUrl,
+      x: screen.x, y: screen.y, name: (content && contentName(content)) ?? tr('body_sun'),
+      detail: `${tr('h_dec')} ${sun.equatorial.declinationDeg.toFixed(1)}° · ${tr('h_ra')} ${sun.equatorial.rightAscensionHours.toFixed(2)}${tr('h_hour')}`,
+      description: content ? contentDescription(content) : undefined, audioUrl: content?.audioUrl,
     });
   }
   if (moonP.visible) {
     const content = getContent(getContentId('moon', 'moon'));
     const screen = project(moonP);
     targets.push({
-      x: screen.x, y: screen.y, name: content?.nameAr ?? 'القمر',
-      detail: `إضاءة ${Math.round((moon.phaseFraction ?? 0) * 100)}% · ميل ${moon.equatorial.declinationDeg.toFixed(1)}°`,
-      description: content?.description, audioUrl: content?.audioUrl,
+      x: screen.x, y: screen.y, name: (content && contentName(content)) ?? tr('body_moon'),
+      detail: `${tr('h_illum')} ${Math.round((moon.phaseFraction ?? 0) * 100)}% · ${tr('h_dec')} ${moon.equatorial.declinationDeg.toFixed(1)}°`,
+      description: content ? contentDescription(content) : undefined, audioUrl: content?.audioUrl,
     });
   }
 
   if (layers.planets) planets.forEach(({ name, state }) => {
     const p = raDecToScreen(state.equatorial.rightAscensionHours, state.equatorial.declinationDeg, gmstDeg, config);
     if (!p.visible) return;
-    const nameAr = PLANET_LABELS_AR[name as keyof typeof PLANET_LABELS_AR] ?? name;
+    const nameAr = planetLabel(name);
     const content = getContent(getContentId('planet', name));
     const screen = project(p);
     targets.push({
-      x: screen.x, y: screen.y, name: content?.nameAr ?? nameAr,
-      detail: `ميل ${state.equatorial.declinationDeg.toFixed(1)}° · م.م ${state.equatorial.rightAscensionHours.toFixed(2)}س`,
-      description: content?.description, audioUrl: content?.audioUrl,
+      x: screen.x, y: screen.y, name: (content && contentName(content)) ?? nameAr,
+      detail: `${tr('h_dec')} ${state.equatorial.declinationDeg.toFixed(1)}° · ${tr('h_ra')} ${state.equatorial.rightAscensionHours.toFixed(2)}${tr('h_hour')}`,
+      description: content ? contentDescription(content) : undefined, audioUrl: content?.audioUrl,
     });
   });
 
@@ -1126,16 +1128,16 @@ function collectHitTargets(
     const content = getContent(getContentId('star', name));
     const screen = project(p);
     targets.push({
-      x: screen.x, y: screen.y, name: content?.nameAr ?? name,
-      detail: `قدر ${star.mag.toFixed(1)} · ميل ${star.dec.toFixed(1)}°`,
-      description: content?.description, audioUrl: content?.audioUrl,
+      x: screen.x, y: screen.y, name: (content && contentName(content)) ?? name,
+      detail: `${tr('h_mag')} ${star.mag.toFixed(1)} · ${tr('h_dec')} ${star.dec.toFixed(1)}°`,
+      description: content ? contentDescription(content) : undefined, audioUrl: content?.audioUrl,
     });
   }
 
   const obsP = latLonToScreen(observer.latitudeDeg, observer.longitudeDeg, config);
   if (layers.observerMarker && obsP.visible) {
     const screen = project(obsP);
-    targets.push({ x: screen.x, y: screen.y, name: 'موقعي', detail: `${observer.latitudeDeg.toFixed(2)}°, ${observer.longitudeDeg.toFixed(2)}°` });
+    targets.push({ x: screen.x, y: screen.y, name: tr('layer_observerMarker'), detail: `${observer.latitudeDeg.toFixed(2)}°, ${observer.longitudeDeg.toFixed(2)}°` });
   }
 
   return targets;

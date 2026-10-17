@@ -775,3 +775,33 @@ input[type='range'].slider {
 .live-note { font-size: 0.78rem; color: var(--text-2); text-align: center; max-width: 300px; line-height: 1.5; }
 .eclnow-head { display: flex; align-items: center; gap: 8px; font-size: 0.84rem; font-weight: 600; color: var(--text-1); }
 .moon-view, .moon-icon { display: block; }
+
+/* ===== عين الراصد (ObserverView): داخل منطقة العرض، والتحكم من لوحة التحكم الرئيسية ===== */
+.eye-root { position: absolute; inset: 0; z-index: 6; background: #000; color: var(--text-1); font-family: var(--font-ui); }
+.eye-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
+.eye-canvas:active { cursor: grabbing; }
+.eye-top, .eye-dial, .eye-card { position: absolute; }
+.eye-top { top: 0; inset-inline: 0; padding: calc(10px + env(safe-area-inset-top, 0px)) 12px 0; display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; pointer-events: none; }
+.eye-top > * { pointer-events: auto; }
+.eye-title { display: flex; flex-direction: column; gap: 2px; background: var(--bg-1); border: 1px solid var(--line); border-radius: var(--r-sm); padding: 6px 10px; font-size: 13px; }
+.eye-mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; direction: ltr; unicode-bidi: isolate; font-size: 12px; color: var(--text-2); }
+.eye-label { font-size: 11px; color: var(--text-3); }
+.eye-chips { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.eye-btn { display: inline-flex; align-items: center; gap: 4px; background: var(--bg-2); color: var(--text-1); border: 1px solid var(--line-strong); border-radius: var(--r-sm); padding: 5px 9px; font-size: 12px; cursor: pointer; }
+.eye-btn:hover { background: var(--bg-3); }
+.eye-btn-icon { padding: 6px; justify-content: center; }
+.eye-range { width: 100%; accent-color: var(--accent); }
+.eye-dial { top: 64px; inset-inline-start: 12px; width: 230px; background: var(--bg-1); border: 1px solid var(--line); border-radius: var(--r-sm); padding: 8px 10px; font-size: 12px; }
+.eye-dial dl { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; margin-top: 6px; }
+.eye-dial dt { color: var(--text-3); }
+.eye-dial dd { text-align: end; }
+.eye-card { inset-inline-start: 12px; bottom: calc(76px + env(safe-area-inset-bottom, 0px)); min-width: 180px; display: flex; flex-direction: column; gap: 3px; background: var(--bg-1); border: 1px solid var(--accent-line); border-radius: var(--r-sm); padding: 8px 10px; font-size: 13px; }
+.eye-card .eye-btn { position: absolute; inset-block-start: 4px; inset-inline-end: 4px; }
+
+/* ===== إرشادات الاختصارات (صفحة الإعدادات) ===== */
+.sc-guide { display: flex; flex-direction: column; gap: 10px; }
+.sc-group-title { font-size: 11px; color: var(--text-3); margin-bottom: 4px; }
+.sc-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 4px 0; font-size: 12px; border-bottom: 1px solid var(--line); }
+.sc-keys { display: flex; flex-wrap: wrap; gap: 3px; justify-content: flex-end; direction: ltr; }
+.sc-guide kbd { font-family: var(--font-mono); font-size: 11px; min-width: 20px; text-align: center; padding: 2px 6px; background: var(--bg-2); color: var(--text-1); border: 1px solid var(--line-strong); border-bottom-width: 2px; border-radius: 5px; }
+.sc-note { font-size: 11px; color: var(--text-3); line-height: 1.6; }

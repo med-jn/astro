@@ -1,18 +1,21 @@
 import { useMemo, useState } from 'react';
-import { Search, X } from 'lucide-react';
+import { Search } from 'lucide-react';
 import { useSimulationStore } from '../state/store';
 import { useSimDate } from '../hooks';
+import { Flyout, NavRow } from './ui';
+import { useI18n } from '../i18n';
 import { searchAll, computeCenterPanDelta, type SearchResult } from '../core/starSearch';
 
 /** مستوى تكبير معقول لعرض الهدف بعد التوسيط — لا يُخفَّض إن كان المستخدم مكبِّراً أكثر أصلاً */
 const SEARCH_ZOOM_SCALE = 2.4;
 
 export function StarSearchBar() {
+  const { t, lang } = useI18n();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
 
   const date = useSimDate(500);
-  const results: SearchResult[] = useMemo(() => searchAll(query, date), [query, date]);
+  const results: SearchResult[] = useMemo(() => searchAll(query, date), [query, date, lang]);
 
   function selectResult(result: SearchResult) {
     const current = useSimulationStore.getState();
@@ -64,40 +67,30 @@ export function StarSearchBar() {
 
   return (
     <div className="icon-item">
-      <button className="icon-trigger" data-active={open} onClick={() => setOpen((v) => !v)} title="البحث في السماء">
-        <Search size={19} />
-        <span className="icon-caption">بحث</span>
-      </button>
+      <NavRow icon={Search} title={t('search_short')} active={open} onClick={() => setOpen((v) => !v)} />
       {open && (
-        <div className="popover-panel" role="dialog" aria-label="البحث في السماء">
-          <div className="popover-header">
-            <Search size={16} />
-            <span className="popover-title-text">البحث في السماء</span>
-            <button className="popover-close" onClick={() => setOpen(false)}><X size={16} /></button>
-          </div>
-          <div className="popover-body">
-            <input
-              type="text"
-              autoFocus
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="ابحث عن نجم أو برج أو منزلة قمرية…"
-              className="search-input"
-            />
-            {query.trim().length > 0 && results.length === 0 && (
-              <div className="search-empty">لا توجد نتائج مطابقة</div>
-            )}
-            {results.length > 0 && (
-              <div className="select-list select-list-scroll">
-                {results.map((r) => (
-                  <button key={r.id} className="select-item" onClick={() => selectResult(r)}>
-                    {r.label}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
+        <Flyout icon={Search} title={t('search_title')} onClose={() => setOpen(false)}>
+          <input
+            type="text"
+            autoFocus
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={t('search_ph')}
+            className="search-input"
+          />
+          {query.trim().length > 0 && results.length === 0 && (
+            <div className="search-empty">{t('search_none')}</div>
+          )}
+          {results.length > 0 && (
+            <div className="select-list select-list-scroll">
+              {results.map((r) => (
+                <button key={r.id} className="select-item" onClick={() => selectResult(r)}>
+                  {r.label}
+                </button>
+              ))}
+            </div>
+          )}
+        </Flyout>
       )}
     </div>
   );

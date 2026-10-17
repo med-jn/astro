@@ -1,5 +1,6 @@
+import { getLang } from '../i18n';
 import { fetchAllRows } from './supabaseClient';
-import { arabicBayerLabel } from './conNames';
+import { arabicBayerLabel, latinBayerLabel } from './conNames';
 
 export interface CatalogStar {
   id: number;
@@ -150,6 +151,7 @@ export function getStarRadiusPx(mag: number): number {
  * ثم الاسم الإنجليزي المُضمَّن في الكتالوج المحلي، ثم تركيبة Bayer+الكوكبة، وإلا null.
  */
 export function getStarDisplayName(star: CatalogStar): string | null {
+  if (getLang() === 'en') return star.name ?? latinBayerLabel(star.bayer, star.flam, star.con);
   const ar = arabicEnrichment.get(star.id);
   if (ar) {
     // إن كان الاسم العربي جماعياً (يخص أكثر من نجم)، أضف مُميّزاً فرعياً بالإنجليزية

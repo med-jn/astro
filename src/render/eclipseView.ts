@@ -9,6 +9,7 @@
  * ما هو مرسوم بأسلوب تصويري: شكل الإكليل ونتوءاته (لا مصدر بيانات لحظي له)، ودرجات ألوان السماء،
  * وتضاريس القمر (مواضع المحيطات والفوهات الكبرى حقيقية بإحداثيات سيلينوغرافية، أما تفاصيلها فاصطناعية).
  */
+import { tr, type TKey } from '../i18n';
 import type { SolarView, LunarView } from '../core/eclipses';
 import { getMoonImage, MOON_IMAGE_ROTATION_CCW_DEG } from './bodyImages';
 
@@ -508,10 +509,8 @@ export function directLight(d: number, U: number, P: number): number {
  * ولا يمكن حسابه مسبقاً.
  *   L0 داكن جداً شبه غير مرئي · L1 رمادي/بني · L2 أحمر صدئ (الأشيع) · L3 قرميدي بحافة صفراء · L4 نحاسي ساطع بحافة زرقاء
  */
-export const DANJON_LABELS_AR = [
-  'L0 — داكن جداً', 'L1 — رمادي بني داكن', 'L2 — أحمر صدئ (النموذجي)',
-  'L3 — أحمر قرميدي بحافة صفراء', 'L4 — نحاسي ساطع بحافة زرقاء',
-];
+/** تسمية مظهر دانجون بلغة التطبيق */
+export const danjonLabel = (i: number): string => tr(`danjon_${i}` as TKey);
 const DANJON_CORE = [0.006, 0.025, 0.07, 0.14, 0.26];       // سطوع مركز الظل
 const DANJON_RIM = [0.03, 0.12, 0.38, 0.62, 0.9];            // سطوع الحافة
 const DANJON_GREEN = [0.75, 0.55, 0.34, 0.42, 0.52];         // دفء اللون: نسبة الأخضر إلى الأحمر
@@ -766,7 +765,7 @@ export interface HorizonStripInput {
   umbralMagnitude: number;
 }
 
-const COMPASS_AR: [number, string][] = [[0, 'شمال'], [45, 'ش.شرق'], [90, 'شرق'], [135, 'ج.شرق'], [180, 'جنوب'], [225, 'ج.غرب'], [270, 'غرب'], [315, 'ش.غرب'], [360, 'شمال']];
+const COMPASS_AZ = [0, 45, 90, 135, 180, 225, 270, 315, 360];
 
 export function drawHorizonStrip(ctx: CanvasRenderingContext2D, w: number, h: number, s: HorizonStripInput) {
   ctx.save();
@@ -798,7 +797,8 @@ export function drawHorizonStrip(ctx: CanvasRenderingContext2D, w: number, h: nu
   // أبرز الاتجاهات والارتفاعات
   ctx.font = '11px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
   ctx.fillStyle = 'rgba(255,255,255,0.65)';
-  for (const [az, name] of COMPASS_AR) {
+  for (const az of COMPASS_AZ) {
+    const name = tr(`compass_${(az / 45) % 8}` as TKey);
     const x = az === 360 ? w - 14 : az === 0 ? 14 : X(az);
     ctx.fillText(name, x, yH + 4);
     if (az !== 0 && az !== 360) { ctx.fillRect(X(az) - 0.5, yH - 4, 1, 4); }
