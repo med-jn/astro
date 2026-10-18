@@ -1,0 +1,8 @@
+الدفعة B + التتبع + ملء الشاشة + الفلتر الشمسي — انسخ فوق المشروع (تشمل كل ما سبق من «عين الراصد»).
+
+جديد   src/render/eyeBodies.ts   القمر: تظليل لومل–سيليغر (تدرّج المنطقة الفاصلة) + ضوء الأرض + دوران الصورة المشترك؛ الشمس: حجم حقيقي + تفلطح بالانكسار
+جديد   src/render/eyeSun.ts      فلتر شمسي: B0/P/L0 (ميوس 29) + قرص ضوء أبيض + بقع توضيحية بدوران تفاضلي
+معدَّل  src/render/eyeRenderer.ts  الكسوف بمصادر القبة (solarViewAt, lunarShadowOnSky, paintDarkRegion, resolveLook, الإكليل وحلقة الألماس)
+معدَّل  src/render/eyeBackground.ts / eyeGpu.ts  تكيّف التعريض مع عتمة الكسوف، سقف لهالة الشمس، تلال أخفض بلا خطوط، بياض الألوان الساطعة
+معدَّل  src/render/observerDome.ts  export لدالة paintDomeCorona فقط
+معدَّل  src/state/eye.ts, components/ObserverView.tsx, ControlsPanel.tsx, GlobalShortcuts.tsx, shortcuts.ts, i18n/ar.ts, en.ts, index.css

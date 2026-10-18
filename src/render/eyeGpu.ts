@@ -105,7 +105,10 @@ vec3 camera(vec3 L, float sat) {
   if (pk > 0.35) c *= (0.35 + (pk - 0.35) / (1.0 + (pk - 0.35) * 0.9)) / pk;
   float sc = 1.0 - smoothstep(0.0004, 0.025, y);
   if (sc > 0.0) { float yy = y * 1.15; c += (vec3(yy * 0.86, yy * 0.96, yy * 1.16) - c) * sc; }
-  return oetf(aces(c));
+  c = aces(c);
+  float wh = smoothstep(0.5, 1.0, max(c.r, max(c.g, c.b))) * 0.65;
+  c += (vec3(dot(c, vec3(0.2126, 0.7152, 0.0722))) - c) * wh; // highlights roll to white (no lemon-yellow horizon)
+  return oetf(c);
 }
 vec3 irradiate(vec3 rho, vec3 n, float k) {
   float cs = max(0.0, dot(n, uSunDir)), cm = max(0.0, dot(n, uMoonDir));
@@ -116,12 +119,12 @@ float detailFade(float freq, float fp) { return 1.0 - smoothstep(0.3, 1.15, freq
 
 // angular ridge heights (deg): far range, and a nearer one with a treeline and crowns
 void ridges(float az, out float farH, out float nearH) {
-  farH = 0.7 + 3.6 * pow(fbm(vec2(az * 0.09, 3.1), 4), 1.35);
-  float nearBase = 0.12 + 1.15 * fbm(vec2(az * 0.21, 41.7), 3);
+  farH = 0.25 + 1.5 * pow(fbm(vec2(az * 0.09, 3.1), 4), 1.35);
+  float nearBase = 0.05 + 0.5 * fbm(vec2(az * 0.21, 41.7), 3);
   float clump = smoothstep(0.42, 0.68, nzv(vec2(az * 0.33, 12.0)));
-  float crowns = pow(abs(sin(az * 4.6 + nzv(vec2(az * 0.7, 3.0)) * 7.0)), 0.55) * 0.3
-               + pow(abs(sin(az * 15.0 + nzv(vec2(az * 2.1, 8.0)) * 9.0)), 0.7) * 0.1;
-  float trees = clump * crowns + 0.2 * (nzv(vec2(az * 2.6, 7.7)) - 0.5) * 0.5 + 0.04 * (nzv(vec2(az * 27.0, 5.1)) - 0.5);
+  float crowns = pow(abs(sin(az * 4.6 + nzv(vec2(az * 0.7, 3.0)) * 7.0)), 0.55) * 0.14
+               + pow(abs(sin(az * 15.0 + nzv(vec2(az * 2.1, 8.0)) * 9.0)), 0.7) * 0.05;
+  float trees = clump * crowns + 0.09 * (nzv(vec2(az * 2.6, 7.7)) - 0.5) * 0.5 + 0.016 * (nzv(vec2(az * 27.0, 5.1)) - 0.5);
   nearH = max(0.03, nearBase + trees);
 }
 
@@ -135,7 +138,7 @@ void main() {
   vec3 rgbOut = vec3(0.0); float alpha = 0.0;
 
   if (u >= 0.0) {
-    if (u > 0.08) { outColor = vec4(0.0); return; }
+    if (u > 0.04) { outColor = vec4(0.0); return; }
     float hFarDeg, hNearDeg; ridges(az, hFarDeg, hNearDeg);
     float hFar = hFarDeg * DEG, hNear = hNearDeg * DEG;
     float nearA = 1.0 - smoothstep(hNear - pxAng, hNear + pxAng, u);
@@ -143,7 +146,7 @@ void main() {
     if (farA <= 0.0) { outColor = vec4(0.0); return; }
     vec3 cFar = camera(irradiate(vec3(0.085, 0.10, 0.12), vec3(0.0, 0.6, 0.8), 1.0), 1.0);
     float hv = min(1.0, u / max(1e-5, hFar));
-    float rel = nzv(vec2(az * 14.0, 3.3)) * 0.5 + nzv(vec2(az * 41.0, 8.8)) * 0.5;
+    float rel = nzv(vec2(az * 14.0, u * 800.0)) * 0.5 + nzv(vec2(az * 41.0, u * 2300.0 + 8.8)) * 0.5;
     vec3 col = mix(cFar, haze, 0.62 + 0.14 * hv - 0.12 * rel);
     float a = farA;
     if (nearA > 0.0) {

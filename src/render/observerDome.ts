@@ -353,7 +353,7 @@ function eqSepDeg(ra1H: number, dec1: number, ra2H: number, dec2: number): numbe
 }
 
 /** إكليل مبسَّط للقبة عند الكلية: هالة داخلية وخارجية وخطوط على طول خط استواء الشمس */
-function paintDomeCorona(
+export function paintDomeCorona(
   ctx: CanvasRenderingContext2D, cx: number, cy: number, R: number, k: number, eqAng: number
 ) {
   if (k < 0.01) return;

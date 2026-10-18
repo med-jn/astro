@@ -203,7 +203,7 @@ export const ar = {
   sc_group_map: "الخريطة",
   sc_help: "عرض هذه الإرشادات",
   sc_eye: "تشغيل/إيقاف عين الراصد",
-  sc_fullscreen: "ملء الشاشة",
+  sc_fullscreen: "ملء الشاشة (وفي عين الراصد: إخفاء كل النوافذ)",
   sc_close: "إغلاق النافذة أو عين الراصد",
   sc_play: "تشغيل/إيقاف الزمن",
   sc_now: "العودة إلى الوقت الحالي",
@@ -265,6 +265,16 @@ export const ar = {
   ep_horizontal_label: 'الخسوف المقلوب:', ep_max_mag: 'أقصى قدر خسف {m}',
   ep_play_lunar: 'تشغيل الخسوف',
   dur_fmt: '{m}د {s}ث',
+  eye_track: "تتبع",
+  eye_track_none: "بلا تتبع",
+  eye_track_star: "النجم المحدد",
+  eye_immersive: "ملء الشاشة (إخفاء النوافذ)",
+  eye_immersive_exit: "الخروج من ملء الشاشة",
+  eye_filter: "فلتر شمسي (ضوء أبيض)",
+  eye_filter_note: "البقع الشمسية هنا نموذج توضيحي بمواضع هليوغرافية صحيحة الدوران واتجاه محور الشمس الحقيقي، وليست بيانات رصد فعلية.",
+  sc_eye_track: "تتبع الشمس / القمر (يبقى في منتصف الإطار)",
+  sc_eye_untrack: "إيقاف التتبع",
+  sc_eye_filter: "الفلتر الشمسي",
 } as const;
 
 export type Dict = { [K in keyof typeof ar]: string };

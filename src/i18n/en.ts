@@ -204,7 +204,7 @@ export const en: Dict = {
   sc_group_map: "Map",
   sc_help: "Show this guide",
   sc_eye: "Toggle observer's eye",
-  sc_fullscreen: "Fullscreen",
+  sc_fullscreen: "Fullscreen (in the observer's eye: hide all panels)",
   sc_close: "Close the panel or observer's eye",
   sc_play: "Play / pause time",
   sc_now: "Back to the current time",
@@ -266,6 +266,16 @@ export const en: Dict = {
   ep_horizontal_label: 'Horizontal eclipse:', ep_max_mag: 'maximum magnitude {m}',
   ep_play_lunar: 'Play the eclipse',
   dur_fmt: '{m}m {s}s',
+  eye_track: "Track",
+  eye_track_none: "Off",
+  eye_track_star: "Selected star",
+  eye_immersive: "Fullscreen (hide panels)",
+  eye_immersive_exit: "Exit fullscreen",
+  eye_filter: "Solar filter (white light)",
+  eye_filter_note: "Sunspots here are an illustrative model with correctly rotating heliographic positions and the Sun's true axis orientation, not live observation data.",
+  sc_eye_track: "Track the Sun / Moon (kept centred)",
+  sc_eye_untrack: "Stop tracking",
+  sc_eye_filter: "Solar filter",
 };
 
 /** تسميات السرعة بالإنجليزية — بترتيب SPEED_LABELS_AR في state/store.ts (7 عناصر). يتحقق منها tests/names.test.ts. */

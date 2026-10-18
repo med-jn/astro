@@ -2,13 +2,14 @@ import { memo, useEffect, useState, type CSSProperties, type ElementType } from 
 import {
   Play, Pause, Clock, MapPinned, LocateFixed, Globe2, Contrast, Orbit, Route, Radar,
   CircleDot, Star, Disc, Tag, Compass, Sparkles, X, RotateCcw, Moon,
-  Grid3x3, Clock3, Telescope, Eye, Menu, Settings as SettingsIcon, Info,
+  Grid3x3, Clock3, Telescope, Eye, Menu, Settings as SettingsIcon, Info, Sun, Maximize,
 } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 import { SPEED_LABELS_AR, useSimulationStore, type LayerToggles } from '../state/store';
 import { useSimDate } from '../hooks';
 import { ZODIAC_ORDER, type ZodiacKey } from '../core/zodiac';
 import { getZodiacNameAr } from '../core/zodiacNamesAr';
+import { PLANET_LABELS_AR, PLANET_NAMES } from '../core/bodies';
 import { getAllLunarMansions } from '../core/mansions';
 import { findPhase } from '../core/lunar';
 import { fmtClock, fmtDateLong, monthName, toInputValue, useI18n, type TKey } from '../i18n';
@@ -83,7 +84,10 @@ function ControlsPanelImpl() {
     useShallow((s) => ({ isPlaying: s.isPlaying, speedIndex: s.speedIndex, observer: s.observer, layers: s.layers, timeZoneKind: s.timeZoneKind, selectedZodiacs: s.selectedZodiacs, selectedMansionIndices: s.selectedMansionIndices, setDate: s.setDate, togglePlay: s.togglePlay, resetToNow: s.resetToNow, setSpeedIndex: s.setSpeedIndex, setObserver: s.setObserver, toggleLayer: s.toggleLayer, toggleZodiacSelection: s.toggleZodiacSelection, clearZodiacSelection: s.clearZodiacSelection, toggleMansionSelection: s.toggleMansionSelection, clearMansionSelection: s.clearMansionSelection, setTimeZoneKind: s.setTimeZoneKind, auroraKp: s.auroraKp, setAuroraKp: s.setAuroraKp })),
   );
 
-  const eye = useEyeStore(useShallow((s) => ({ open: s.open, projection: s.projection, ground: s.ground, sundial: s.sundial, altAzGrid: s.altAzGrid, fovDeg: s.fovDeg })));
+  const eye = useEyeStore(useShallow((s) => ({ open: s.open, projection: s.projection, ground: s.ground, sundial: s.sundial, altAzGrid: s.altAzGrid, fovDeg: s.fovDeg, track: s.track, solarFilter: s.solarFilter, immersive: s.immersive })));
+  const trackZodiacs = useSimulationStore((s) => s.selectedZodiacs);
+  const trackStar = useSimulationStore((s) => s.highlightedStarId);
+  const trackIs = (k: string, extra?: string) => !!eye.track && eye.track.kind === k && (extra === undefined || ('name' in eye.track ? eye.track.name === extra : 'key' in eye.track ? eye.track.key === extra : true));
   const [fovLo, fovHi] = fovLimits(eye.projection);
 
   const closeAll = () => { setOpenPopover(null); };
@@ -330,6 +334,22 @@ function ControlsPanelImpl() {
                           ))}
                         </div>
                       </Section>
+                      <Section title={t('eye_track')}>
+                        <div className="eye-chips">
+                          <button className="eye-btn" data-on={!eye.track} onClick={() => useEyeStore.getState().setTrack(null)}>{t('eye_track_none')}</button>
+                          <button className="eye-btn" data-on={trackIs('sun')} onClick={() => useEyeStore.getState().setTrack({ kind: 'sun' })}>{t('eye_sun')}</button>
+                          <button className="eye-btn" data-on={trackIs('moon')} onClick={() => useEyeStore.getState().setTrack({ kind: 'moon' })}>{t('eye_moon')}</button>
+                          {PLANET_NAMES.map((n) => (
+                            <button key={n} className="eye-btn" data-on={trackIs('planet', n)} onClick={() => useEyeStore.getState().setTrack({ kind: 'planet', name: n })}>{lang === 'ar' ? PLANET_LABELS_AR[n] : n}</button>
+                          ))}
+                          {trackZodiacs.map((z) => (
+                            <button key={String(z)} className="eye-btn" data-on={trackIs('zodiac', String(z))} onClick={() => useEyeStore.getState().setTrack({ kind: 'zodiac', key: String(z) })}>
+                              {zodiacName(String(z), getZodiacNameAr(z, Math.max(0, ZODIAC_ORDER.indexOf(z))), lang)}
+                            </button>
+                          ))}
+                          {trackStar !== null && <button className="eye-btn" data-on={trackIs('star')} onClick={() => useEyeStore.getState().setTrack({ kind: 'star' })}>{t('eye_track_star')}</button>}
+                        </div>
+                      </Section>
                       <Section title={t('eye_projection')}>
                         <Segmented<ProjectionKind> label={t('eye_projection')} value={eye.projection} onChange={(p) => useEyeStore.getState().setProjection(p)}
                           options={EYE_PROJECTIONS.map((p) => ({ value: p, label: t(`eye_proj_${p}` as TKey) }))} />
@@ -343,6 +363,9 @@ function ControlsPanelImpl() {
                         <SwitchRow icon={Globe2} label={t('eye_opt_ground')} checked={eye.ground} onChange={() => useEyeStore.getState().toggle('ground')} />
                         <SwitchRow icon={Clock} label={t('eye_opt_sundial')} checked={eye.sundial} onChange={() => useEyeStore.getState().toggle('sundial')} />
                         <SwitchRow icon={Grid3x3} label={t('eye_opt_grid')} checked={eye.altAzGrid} onChange={() => useEyeStore.getState().toggle('altAzGrid')} />
+                        <SwitchRow icon={Sun} label={t('eye_filter')} checked={eye.solarFilter} onChange={() => useEyeStore.getState().setSolarFilter(!eye.solarFilter)} />
+                        {eye.solarFilter && <p className="sc-note">{t('eye_filter_note')}</p>}
+                        <SwitchRow icon={Maximize} label={t('eye_immersive')} checked={eye.immersive} onChange={() => useEyeStore.getState().setImmersive(!eye.immersive)} />
                       </Section>
                     </>
                   )}

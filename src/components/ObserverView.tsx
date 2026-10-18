@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import { X } from 'lucide-react';
+import { Maximize, Minimize, X } from 'lucide-react';
 import * as Astronomy from 'astronomy-engine';
 import { useSimulationStore } from '../state/store';
-import { useEyeStore, type LookKind } from '../state/eye';
+import { useEyeStore, type LookKind, type TrackTarget } from '../state/eye';
+import { getLoadedZodiac } from '../core/zodiac';
+import { getStarByIdMap } from '../core/starCatalog';
+import { makeSkyFrame, placeRaDecJ2000 } from '../core/skyModel';
 import { useI18n, type TKey } from '../i18n';
 import { mansionName } from '../i18n/names';
 import { PLANET_LABELS_AR, getAllPlanetStates, getGMSTDeg, getMoonState, getSunState } from '../core/bodies';
@@ -48,6 +51,8 @@ function fmtHour(h: number): string {
 export function ObserverView({ onFrame }: { onFrame?: (o: RenderOutput) => void }) {
   const { t, lang } = useI18n();
   const showDial = useEyeStore((s) => s.sundial);
+  const immersive = useEyeStore((s) => s.immersive);
+  const [chrome, setChrome] = useState(true);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const camRef = useRef<Camera>({ ...DEFAULT_CAMERA, projection: useEyeStore.getState().projection });
@@ -57,6 +62,7 @@ export function ObserverView({ onFrame }: { onFrame?: (o: RenderOutput) => void 
   const targetsRef = useRef<EyeTarget[]>([]);
   const outRef = useRef<SundialReadout | null>(null);
   const statesRef = useRef<EyeStates | null>(null);
+  const frameRef = useRef<ReturnType<typeof makeSkyFrame> | null>(null);
   const onFrameRef = useRef(onFrame);
   onFrameRef.current = onFrame;
   const langRef = useRef({ lang, t });
@@ -78,6 +84,28 @@ export function ObserverView({ onFrame }: { onFrame?: (o: RenderOutput) => void 
     return () => window.removeEventListener('popstate', onPop);
   }, []);
 
+  /* ---------- ملء الشاشة: يخفي كل النوافذ (والشاشة الكاملة للمتصفح إن أمكن) ---------- */
+  useEffect(() => {
+    document.body.classList.toggle('eye-immersive', immersive);
+    if (immersive && !document.fullscreenElement) void document.documentElement.requestFullscreen?.().catch(() => undefined);
+    if (!immersive && document.fullscreenElement) void document.exitFullscreen().catch(() => undefined);
+    setChrome(true);
+    if (!immersive) return () => document.body.classList.remove('eye-immersive');
+    let timer = window.setTimeout(() => setChrome(false), 2500);
+    const wake = () => { setChrome(true); window.clearTimeout(timer); timer = window.setTimeout(() => setChrome(false), 2500); };
+    window.addEventListener('pointermove', wake);
+    return () => { window.removeEventListener('pointermove', wake); window.clearTimeout(timer); document.body.classList.remove('eye-immersive'); };
+  }, [immersive]);
+  useEffect(() => {
+    const onFs = () => { if (!document.fullscreenElement && useEyeStore.getState().immersive) useEyeStore.getState().setImmersive(false); };
+    document.addEventListener('fullscreenchange', onFs);
+    return () => {
+      document.removeEventListener('fullscreenchange', onFs);
+      useEyeStore.getState().setImmersive(false);
+      if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined);
+    };
+  }, []);
+
   /* ---------- الحلقة والتفاعل ---------- */
   useEffect(() => {
     document.body.classList.add('eye-view-open');
@@ -96,6 +124,33 @@ export function ObserverView({ onFrame }: { onFrame?: (o: RenderOutput) => void 
     const helpers = { drawMoon, drawPlanetDot };
 
     const touch = () => { lastInteractRef.current = performance.now(); tweenRef.current = null; };
+    // موضع الجرم المتتبَّع (سمت/ارتفاع) من حالات الإطار نفسها
+    const zodiacCentre = new Map<string, { ra: number; dec: number }>();
+    const resolveTrack = (tt: TrackTarget): { az: number; alt: number } | null => {
+      const s2 = statesRef.current, fr = frameRef.current;
+      if (!s2) return null;
+      if (tt.kind === 'sun') return { az: s2.sun.horizontal.azimuthDeg, alt: s2.sun.horizontal.altitudeDeg };
+      if (tt.kind === 'moon') return { az: s2.moon.horizontal.azimuthDeg, alt: s2.moon.horizontal.altitudeDeg };
+      if (tt.kind === 'planet') { const pl = s2.planets.find((q) => q.name === tt.name); return pl ? { az: pl.state.horizontal.azimuthDeg, alt: pl.state.horizontal.altitudeDeg } : null; }
+      if (!fr) return null;
+      if (tt.kind === 'star') {
+        const id = useSimulationStore.getState().highlightedStarId;
+        const star = id === null ? undefined : getStarByIdMap().get(id);
+        if (!star) return null;
+        const hh = placeRaDecJ2000(fr, star.ra, star.dec); return { az: hh.azDeg, alt: hh.altDeg };
+      }
+      let c = zodiacCentre.get(tt.key);
+      if (!c) {
+        const z = getLoadedZodiac()[tt.key];
+        if (!z) return null;
+        let x = 0, y = 0, zz = 0;
+        for (const seg of z.segments) for (const q of seg) { if (!q) continue; const ra = q[0] * 15 * (Math.PI / 180), de = q[1] * (Math.PI / 180); x += Math.cos(de) * Math.cos(ra); y += Math.cos(de) * Math.sin(ra); zz += Math.sin(de); }
+        const l = Math.hypot(x, y, zz); if (!l) return null;
+        c = { ra: ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360 / 15, dec: (Math.asin(zz / l) * 180) / Math.PI };
+        zodiacCentre.set(tt.key, c);
+      }
+      const hh = placeRaDecJ2000(fr, c.ra, c.dec); return { az: hh.azDeg, alt: hh.altDeg };
+    };
     // حركة سلسة بزمن الإطار (مثل ستيلاريوم): سرعات تتسارع وتتباطأ، تكبير يلحق هدفه تحت المؤشر، قصور ذاتي بعد السحب
     const keys = new Set<string>();
     let velAz = 0, velAlt = 0, inertiaTau = 0.1, dragging = false, lastNow = performance.now();
@@ -151,7 +206,15 @@ export function ObserverView({ onFrame }: { onFrame?: (o: RenderOutput) => void 
         const ky = (keys.has('ArrowUp') ? 1 : 0) - (keys.has('ArrowDown') ? 1 : 0);
         const keyActive = kx !== 0 || ky !== 0;
         if (keyActive) { tweenRef.current = null; inertiaTau = 0.1; }
-        if (!dragging) {
+        const trk = es.track;
+        if (trk && (keyActive || dragging)) es.setTrack(null); // أي التفات يدوي يوقف التتبع
+        const tg = trk && !keyActive && !dragging ? resolveTrack(trk) : null;
+        if (tg) {
+          const kT = 1 - Math.exp(-dt / 0.1);
+          let dA = tg.az - c.azDeg; if (dA > 180) dA -= 360; if (dA < -180) dA += 360;
+          c = clampCamera({ ...c, azDeg: c.azDeg + dA * kT, altDeg: c.altDeg + (tg.alt - c.altDeg) * kT });
+          velAz = 0; velAlt = 0; tweenRef.current = null; lastInteractRef.current = now;
+        } else if (!dragging) {
           const sp = Math.min(70, Math.max(4, c.fovDeg * 0.5)); // درجة/ث تتناسب مع المجال
           const k = 1 - Math.exp(-dt / (keyActive ? 0.1 : inertiaTau));
           velAz += (kx * sp - velAz) * k; velAlt += (ky * sp - velAlt) * k;
@@ -186,6 +249,7 @@ export function ObserverView({ onFrame }: { onFrame?: (o: RenderOutput) => void 
       const sKey = `${dateMs}|${obs.latitudeDeg}|${obs.longitudeDeg}|${obs.elevationM}`;
       if (sKey !== statesKey || !statesRef.current) {
         statesRef.current = computeStates(st.date, obs); statesKey = sKey;
+        frameRef.current = makeSkyFrame(Astronomy.MakeTime(st.date), obs);
         const s = statesRef.current;
         // بطاقة «بيانات السماء» تقرأ هذه القيم نفسها (مصدر واحد)
         onFrameRef.current?.({ sun: s.sun, moon: s.moon, planets: s.planets, gmstDeg: s.gmstDeg, hitTargets: [] });
@@ -199,7 +263,7 @@ export function ObserverView({ onFrame }: { onFrame?: (o: RenderOutput) => void 
       const bgScale = busy ? 0.18 : 0.45;
       const key = [
         cam.azDeg.toFixed(3), cam.altDeg.toFixed(3), cam.fovDeg.toFixed(3), cam.rollDeg, cam.projection, W, H, dpr, bgScale, sKey, lg,
-        L.stars, L.planets, L.labels, L.ecliptic, L.aurora, es.ground, es.sundial, es.altAzGrid,
+        L.stars, L.planets, L.labels, L.ecliptic, L.aurora, es.ground, es.sundial, es.altAzGrid, es.solarFilter,
         st.auroraKp, st.selectedZodiacs.join(','), st.selectedMansionIndices.join(','), st.selectedGroupIds.join(','), st.highlightedStarId,
       ].join('|');
 
@@ -211,7 +275,7 @@ export function ObserverView({ onFrame }: { onFrame?: (o: RenderOutput) => void 
           options: {
             stars: L.stars, planets: L.planets, labels: L.labels, ecliptic: L.ecliptic,
             ground: es.ground, sundial: es.sundial, altAzGrid: es.altAzGrid,
-            aurora: L.aurora, auroraKp: st.auroraKp, eyeHeightM: EYE_HEIGHT_M,
+            aurora: L.aurora, auroraKp: st.auroraKp, eyeHeightM: EYE_HEIGHT_M, solarFilter: es.solarFilter,
           },
           selection: { zodiacs: st.selectedZodiacs, mansionIndices: st.selectedMansionIndices, groupIds: st.selectedGroupIds, highlightedStarId: st.highlightedStarId },
           names: {
@@ -317,7 +381,9 @@ export function ObserverView({ onFrame }: { onFrame?: (o: RenderOutput) => void 
       if (e.code === 'Escape') {
         // نافذة منبثقة في اللوحة مفتوحة: اللوحة تغلقها أولاً
         if (document.querySelector('.popover-panel')) return;
-        e.stopImmediatePropagation(); e.preventDefault(); requestClose(); return;
+        e.stopImmediatePropagation(); e.preventDefault();
+        if (useEyeStore.getState().immersive) useEyeStore.getState().setImmersive(false); else requestClose();
+        return;
       }
       if (e.ctrlKey || e.metaKey || e.altKey) return;
       if (HOLD_CODES.includes(e.code)) {
@@ -328,11 +394,13 @@ export function ObserverView({ onFrame }: { onFrame?: (o: RenderOutput) => void 
       }
       let used = true;
       switch (e.code) {
-        case 'Home': startLook('home'); break;
-        case 'KeyS': startLook('sun'); break;
-        case 'KeyM': startLook('moon'); break;
-        case 'KeyZ': startLook('zenith'); break;
-        case 'KeyT': startLook('dial'); break;
+        case 'Home': useEyeStore.getState().setTrack(null); startLook('home'); break;
+        case 'KeyS': if (e.shiftKey) useEyeStore.getState().setTrack({ kind: 'sun' }); else useEyeStore.getState().look('sun'); break;
+        case 'KeyM': if (e.shiftKey) useEyeStore.getState().setTrack({ kind: 'moon' }); else useEyeStore.getState().look('moon'); break;
+        case 'KeyX': useEyeStore.getState().setTrack(null); break;
+        case 'KeyV': useEyeStore.getState().setSolarFilter(!useEyeStore.getState().solarFilter); break;
+        case 'KeyZ': useEyeStore.getState().look('zenith'); break;
+        case 'KeyT': useEyeStore.getState().look('dial'); break;
         case 'Digit1': useEyeStore.getState().setProjection('perspective'); break;
         case 'Digit2': useEyeStore.getState().setProjection('stereographic'); break;
         case 'Digit3': useEyeStore.getState().setProjection('equidistant'); break;
@@ -367,7 +435,7 @@ export function ObserverView({ onFrame }: { onFrame?: (o: RenderOutput) => void 
 
   const sd = hud.sundial;
   return (
-    <div className="eye-root" role="region" aria-label={t('nav_eye')}>
+    <div className="eye-root" role="region" aria-label={t('nav_eye')} data-immersive={immersive} data-chrome={chrome}>
       <canvas ref={canvasRef} className="eye-canvas" />
 
       <div className="eye-top">
@@ -375,7 +443,12 @@ export function ObserverView({ onFrame }: { onFrame?: (o: RenderOutput) => void 
           <strong>{t('nav_eye')}</strong>
           <span className="eye-mono">{t('eye_hud', { az: hud.az.toFixed(1), alt: hud.alt.toFixed(1), fov: hud.fov.toFixed(hud.fov < 10 ? 2 : 1) })}</span>
         </div>
-        <button className="eye-btn eye-btn-icon" onClick={requestClose} aria-label={t('eye_close')} title={t('eye_close')}><X size={18} /></button>
+        <div className="eye-top-actions">
+          <button className="eye-btn eye-btn-icon" onClick={() => useEyeStore.getState().setImmersive(!immersive)} aria-label={t(immersive ? 'eye_immersive_exit' : 'eye_immersive')} title={t(immersive ? 'eye_immersive_exit' : 'eye_immersive')}>
+            {immersive ? <Minimize size={18} /> : <Maximize size={18} />}
+          </button>
+          <button className="eye-btn eye-btn-icon" onClick={requestClose} aria-label={t('eye_close')} title={t('eye_close')}><X size={18} /></button>
+        </div>
       </div>
 
       {showDial && sd && (

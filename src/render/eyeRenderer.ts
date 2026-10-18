@@ -1,19 +1,21 @@
 import { clampCamera, dirFromAltAz, makeProjector, type Camera, type Projector, type V3 } from '../core/camera';
 import { ensureSkyTables, type DomeSkyInput } from './domeSky';
-import { buildSkyTexture, groundShadowK, paintGroundLayer, paintSkyBackground } from './eyeBackground';
+import { buildSkyTexture, getExposure, groundShadowK, paintGroundLayer, paintSkyBackground } from './eyeBackground';
+import { paintEyeMoon, paintEyeSun, refractionFlatten } from './eyeBodies';
+import { paintFilteredSun, solarPhysical } from './eyeSun';
 import { getLoadedStars, getStarByIdMap, getStarColor, getStarDisplayName, getStarRadiusPx } from '../core/starCatalog';
 import { limitingMagnitude, makeSkyFrame, placeRaDecJ2000, StarField, starAlpha } from '../core/skyModel';
 import { getGroupLines } from '../core/starGroups';
 import { getLoadedZodiac } from '../core/zodiac';
 import { getAllLunarMansions, MANSION_SPAN_DEG } from '../core/mansions';
 import { eclipticLongitudeToEquatorial } from '../core/eclipticTransform';
-import { apparentAltitude, equatorialToHorizontal, paintDomeSun } from './observerDome';
+import { apparentAltitude, equatorialToHorizontal, paintDomeCorona } from './observerDome';
 import { auroraBrightness, computeAuroraArcs } from '../core/aurora';
 import { apparentSolarHour, gnomonShadow, hourAngleDeg, shadowTipCurve, SOLSTICE_DEC_DEG } from '../core/sundial';
-import { directSunLight } from '../core/skyRadiance';
-import { moonTexFromAxes } from './eclipseOverlay';
+import { moonTexFromAxes, paintDarkRegion } from './eclipseOverlay';
+import { resolveLook } from '../core/danjon';
 import { getMoonImage } from './bodyImages';
-import { moonPoleAngleDeg } from '../core/eclipses';
+import { lunarShadowOnSky, moonPoleAngleDeg, solarViewAt, type SolarView } from '../core/eclipses';
 import { PLANET_COLORS } from '../core/bodies';
 import type { CelestialBodyState, ObserverLocation } from '../types/astro';
 import * as Astronomy from 'astronomy-engine';
@@ -37,6 +39,8 @@ const DIAL_N = -4.2;
 const PLATE_RADIUS_M = 3.2;
 const ROD_RADIUS_M = 0.025;
 const SUN_ANGULAR_DIAMETER_RAD = 0.00931;
+/** تعريض يُظهر أسطع نقطة في القمر عند ~0.9 (سطوع القمر الكامل ≈ 3400 cd/m²): يُؤخذ الأدنى منه ومن تعريض المشهد */
+const MOON_EXPOSURE = 0.9 / 3400;
 
 export interface EyeStates {
   sun: CelestialBodyState;
@@ -49,6 +53,8 @@ export interface EyeOptions {
   stars: boolean; planets: boolean; labels: boolean; ecliptic: boolean;
   ground: boolean; sundial: boolean; altAzGrid: boolean;
   aurora: boolean; auroraKp: number;
+  /** فلتر شمسي: كل شيء معتم عدا قرص الشمس */
+  solarFilter?: boolean;
   /** ارتفاع العين فوق الأرض (م) */
   eyeHeightM: number;
 }
@@ -266,8 +272,19 @@ export function renderEye(ctx: CanvasRenderingContext2D, w: number, h: number, i
   const px: { x: number; y: number } = { x: 0, y: 0 };
   const scaleCenter = P.scaleAt(P.basis.fwd);
 
-  // السماء
-  const skyIn: DomeSkyInput = { sunAlt, sunAz, moonAlt, moonAz, moonPhase, sunFraction: 1 };
+  // الكسوف: بالمعايير نفسها في القبة (solarViewAt لا يُستدعى إلا قرب الاقتران)
+  const sunDir = toDir(sunAlt, sunAz), moonDir = toDir(moonAlt, moonAz);
+  const sepEq = Math.acos(Math.max(-1, Math.min(1, sunDir[0] * moonDir[0] + sunDir[1] * moonDir[1] + sunDir[2] * moonDir[2]))) / DEG;
+  let solar: SolarView | null = null;
+  if (sepEq < 4 && sunAlt > -3) {
+    try { solar = solarViewAt(input.date, input.observer); } catch { solar = null; }
+    if (solar && solar.separationDeg > 3.2) solar = null;
+  }
+  const obsc = solar ? solar.obscuration : 0;
+  const darkness = solar && solar.phase !== 'none' ? 1 - Math.pow(Math.max(0, 1 - obsc), 0.35) : 0;
+  const totalK = solar && solar.diameterRatio > 1 ? (solar.phase === 'total' ? 1 : smoothstep(0.985, 1, solar.magnitude)) : 0;
+  const altEff = sunAlt + (Math.min(sunAlt, -7) - sunAlt) * darkness; // الارتفاع الفعّال: يُظلم الرصد في ذروة الكسوف
+  const skyIn: DomeSkyInput = { sunAlt, sunAz, moonAlt, moonAz, moonPhase, sunFraction: solar ? 1 - obsc : 1 };
   const version = ensureSkyTables(skyIn, nowMs);
   buildSkyTexture(skyIn, version, nowMs);
   ctx.save();
@@ -276,7 +293,7 @@ export function renderEye(ctx: CanvasRenderingContext2D, w: number, h: number, i
 
   // أبعاد زاوية → بكسل عند اتجاه
   const pxAt = (angDeg: number, d: V3) => angDeg * DEG * P.scaleAt(d);
-  const limitMag = limitingMagnitude(sunAlt, { altDeg: moonAlt, phaseFraction: moonPhase });
+  const limitMag = limitingMagnitude(altEff, { altDeg: moonAlt, phaseFraction: moonPhase });
   const fov = cam.fovDeg;
   const detail = Math.max(0, Math.log2(Math.max(1, 90 / fov))); // كلما ضاق المجال زاد التفصيل
 
@@ -416,48 +433,102 @@ export function renderEye(ctx: CanvasRenderingContext2D, w: number, h: number, i
   }
 
   // الشمس
-  const sunDir = toDir(sunAlt, sunAz);
-  if (sunAlt > -1 && P.project(sunDir, px)) {
-    const r = Math.max(5, pxAt((states.sun.angularSizeDeg ?? 0.533) / 2, sunDir));
-    const { rel } = directSunLight(sunAlt);
-    // توهّج الكاميرا: يتّسع بسطوع الشمس ظهراً بنسبة الشاشة لا القرص، فتبدو ساطعة حتى في المجال الواسع
-    const bright = Math.max(0, Math.log10(Math.max(rel, 1e-4)) + 3) / 3;
-    const bloom = Math.min(w, h) * 0.2 * bright * bright * smoothstep(0, 12, sunAlt);
-    if (bloom > 4) {
-      ctx.save(); ctx.globalCompositeOperation = 'lighter';
-      const g = ctx.createRadialGradient(px.x, px.y, r, px.x, px.y, bloom);
-      g.addColorStop(0, 'rgba(255,246,225,0.55)'); g.addColorStop(0.3, 'rgba(255,236,200,0.16)'); g.addColorStop(1, 'rgba(255,236,200,0)');
-      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(px.x, px.y, bloom, 0, Math.PI * 2); ctx.fill(); ctx.restore();
-    }
-    paintDomeSun(ctx, px.x, px.y, r, sunAlt);
-    labels.push({ text: input.names.sun, x: px.x, y: px.y, ox: 0, oy: -r - 8, font: '12px system-ui, sans-serif', color: '#fde68a', align: 'center', prio: 100 });
-    if (sunAlt > 0) targets.push({ x: px.x, y: px.y, name: input.names.sun, detail: `${sunAlt.toFixed(1)}° · ${sunAz.toFixed(1)}°`, kind: 'sun' });
+  const sunVisible = sunAlt > -1 && P.project(sunDir, px);
+  const sunPx = { x: px.x, y: px.y };
+  const sunRadiusDeg = solar ? solar.sun.radiusDeg : (states.sun.angularSizeDeg ?? 0.533) / 2;
+  const sunR = Math.max(2, pxAt(sunRadiusDeg, sunDir));
+  // اتجاها السمت وازدياد السمت على الشاشة عند الشمس (لتفلطح القرص بالانكسار ولاتجاه الإكليل)
+  let zenAng = -Math.PI / 2, eastAng = 0;
+  if (sunVisible) {
+    const q = { x: 0, y: 0 };
+    if (P.project(toDir(Math.min(89.9, sunAlt + 0.3), sunAz), q)) zenAng = Math.atan2(q.y - sunPx.y, q.x - sunPx.x);
+    if (P.project(toDir(sunAlt, sunAz + 0.3 / Math.max(0.05, Math.cos(sunAlt * DEG))), q)) eastAng = Math.atan2(q.y - sunPx.y, q.x - sunPx.x);
   }
 
-  // القمر: بصورته وطوره، وجهة الإضاءة نحو الشمس على الدائرة العظمى، وتوجيه النسيج بمحوري الشمال/الشرق السماويين
-  const moonDir = toDir(moonAlt, moonAz);
-  if (moonAlt > -1 && P.project(moonDir, px)) {
-    const mp = { x: px.x, y: px.y, visible: true };
-    const r = Math.max(5, pxAt((states.moon.angularSizeDeg ?? 0.52) / 2, moonDir));
-    // اتجاه الشمس على الشاشة: نزيح القمر 1.5° نحو الشمس على الدائرة العظمى ونسقطه
+  const moonVisible = moonAlt > -1 && P.project(moonDir, px);
+  const mp = { x: px.x, y: px.y, visible: true };
+  let moonR = Math.max(2, pxAt((states.moon.angularSizeDeg ?? 0.52) / 2, moonDir));
+  const wEcl = solar ? smoothstep(3.0, 0.9, solar.separationDeg) : 0;
+  if (moonVisible && solar && wEcl > 0) {
+    // موضع القمر الدقيق قرب الشمس (إزاحة مقيسة من solarViewAt) بمزج متدرّج مع الموضع العادي
+    const q = { x: 0, y: 0 };
+    if (P.project(toDir(sunAlt + solar.dyDeg, sunAz + solar.dxDeg / Math.max(0.05, Math.cos(sunAlt * DEG))), q)) {
+      mp.x += (q.x - mp.x) * wEcl; mp.y += (q.y - mp.y) * wEcl;
+    }
+    moonR += (Math.max(2, pxAt(solar.moon.radiusDeg, sunDir)) - moonR) * wEcl;
+  }
+  // اتجاه الإضاءة على الشاشة: نقطة تبعد 1.5° عن القمر نحو الشمس
+  let sunP = { x: mp.x + 100, y: mp.y, visible: true };
+  let moonAxes: { e: { x: number; y: number }; n: { x: number; y: number } } | null = null;
+  let tex: { rotRad: number; mirror: boolean } | undefined;
+  if (moonVisible) {
     const toSun = sunDir.map((v, i) => v - moonDir[i] * (sunDir[0] * moonDir[0] + sunDir[1] * moonDir[1] + sunDir[2] * moonDir[2])) as V3;
     const tl = Math.hypot(toSun[0], toSun[1], toSun[2]) || 1;
     const off: V3 = [moonDir[0] * Math.cos(1.5 * DEG) + (toSun[0] / tl) * Math.sin(1.5 * DEG), moonDir[1] * Math.cos(1.5 * DEG) + (toSun[1] / tl) * Math.sin(1.5 * DEG), moonDir[2] * Math.cos(1.5 * DEG) + (toSun[2] / tl) * Math.sin(1.5 * DEG)];
     const o = { x: 0, y: 0 };
-    let sunP = { x: mp.x + 100, y: mp.y, visible: true };
-    if (P.project(off, o)) { const dx = o.x - mp.x, dy = o.y - mp.y, l = Math.hypot(dx, dy) || 1; sunP = { x: mp.x + (dx / l) * 100, y: mp.y + (dy / l) * 100, visible: true }; }
-    // محورا الشمال والشرق السماويان عند القمر
+    if (P.project(off, o)) { const dx = o.x - px.x, dy = o.y - px.y, l = Math.hypot(dx, dy) || 1; sunP = { x: mp.x + (dx / l) * 100, y: mp.y + (dy / l) * 100, visible: true }; }
+    // محورا القمر على الشاشة (شرق/شمال سماويان) من المصدر المشترك لدوران الصورة
     const mra = states.moon.equatorial.rightAscensionHours, mdec = states.moon.equatorial.declinationDeg;
     const proj = (ra: number, dec: number) => { const q = ofDate(ra, dec); const e = { x: 0, y: 0 }; return P.project(toDir(q.alt, q.az), e) ? e : null; };
     const p0 = proj(mra, mdec), pe = proj(mra + (0.05 / Math.max(0.05, Math.cos(mdec * DEG))) / 15, mdec), pn = proj(mra, mdec + (mdec > 85 ? -0.05 : 0.05));
-    let tex: { rotRad: number; mirror: boolean } | undefined;
-    if (p0 && pe && pn && r >= 5 && getMoonImage()) {
+    if (p0 && pe && pn) {
       const unit = (dx: number, dy: number) => { const l = Math.hypot(dx, dy) || 1; return { x: dx / l, y: dy / l }; };
       const n0 = unit(pn.x - p0.x, pn.y - p0.y);
-      tex = moonTexFromAxes({ e: unit(pe.x - p0.x, pe.y - p0.y), n: mdec > 85 ? { x: -n0.x, y: -n0.y } : n0 }, moonPoleAngleDeg(input.date));
+      moonAxes = { e: unit(pe.x - p0.x, pe.y - p0.y), n: mdec > 85 ? { x: -n0.x, y: -n0.y } : n0 };
+      if (moonR >= 2 && getMoonImage()) tex = moonTexFromAxes(moonAxes, moonPoleAngleDeg(input.date));
     }
-    helpers.drawMoon(ctx, states.moon, mp, sunP, r, tex, 1, false);
-    labels.push({ text: input.names.moon, x: mp.x, y: mp.y, ox: 0, oy: r + 15, font: '12px system-ui, sans-serif', color: '#e2e8f0', align: 'center', prio: 100 });
+  }
+  const realOverlap = (solar ? solar.separationDeg : sepEq) < 0.62;
+  const eclipseSepL = 180 - sepEq;
+  const flattenSun = solar ? solar.flatten : refractionFlatten(sunAlt, sunRadiusDeg);
+
+  const paintSunNow = () => {
+    ctx.save(); ctx.globalAlpha = 0.1 + 0.9 * Math.sqrt(Math.max(0, 1 - obsc));
+    paintEyeSun(ctx, sunPx.x, sunPx.y, sunR, sunAlt, flattenSun, zenAng);
+    ctx.restore();
+  };
+  const paintMoonNow = () => {
+    if (realOverlap) { ctx.save(); ctx.fillStyle = '#0a0a10'; ctx.beginPath(); ctx.arc(mp.x, mp.y, moonR, 0, Math.PI * 2); ctx.fill(); ctx.restore(); }
+    const brightness = Math.pow(Math.min(1, getExposure() / MOON_EXPOSURE), 1 / 2.2);
+    const done = tex ? paintEyeMoon(ctx, mp.x, mp.y, moonR, { sunDirAngle: Math.atan2(sunP.y - mp.y, sunP.x - mp.x), tex, phaseFraction: moonPhase, brightness }) : false;
+    if (!done) helpers.drawMoon(ctx, states.moon, mp, sunP, moonR, tex, 1, realOverlap);
+    // خسوف: منطقة معتمة بحسب الموضع الحقيقي لمركز الظل (الدالة والمظهر المشتركان في المشروع)
+    if (moonAxes && eclipseSepL < 2.4) {
+      const sh = lunarShadowOnSky(input.date);
+      if (sh.penumbralMagnitude > 0) {
+        const cx = mp.x + moonR * (sh.eastMoonRadii * moonAxes.e.x + sh.northMoonRadii * moonAxes.n.x);
+        const cy = mp.y + moonR * (sh.eastMoonRadii * moonAxes.e.y + sh.northMoonRadii * moonAxes.n.y);
+        paintDarkRegion(ctx, mp.x, mp.y, moonR, cx, cy, sh.umbra * moonR, sh.penumbra * moonR, resolveLook(input.date));
+      }
+    }
+  };
+  if (sunVisible && moonVisible && (realOverlap || (solar && wEcl > 0.5))) {
+    paintSunNow(); paintMoonNow();
+    if (solar && totalK > 0.01) {
+      const pa = solar.poleAngleDeg * DEG, ux = Math.cos(zenAng), uy = Math.sin(zenAng), sx = Math.cos(eastAng), sy = Math.sin(eastAng);
+      paintDomeCorona(ctx, sunPx.x, sunPx.y, sunR, totalK, Math.atan2(-Math.sin(pa) * uy + Math.cos(pa) * sy, -Math.sin(pa) * ux + Math.cos(pa) * sx));
+    }
+    // حلقة الألماس عند بداية/نهاية الكلية
+    if (solar && solar.phase !== 'annular' && solar.obscuration > 0.985 && solar.diameterRatio > 1 && solar.phase !== 'total') {
+      const dx = sunPx.x - mp.x, dy = sunPx.y - mp.y, d = Math.hypot(dx, dy) || 1;
+      const bx = sunPx.x + (dx / d) * sunR, by = sunPx.y + (dy / d) * sunR;
+      const cl = smoothstep(0.985, 0.9995, Math.min(solar.magnitude, 0.9995));
+      const gl = ctx.createRadialGradient(bx, by, 0, bx, by, sunR * 1.1);
+      ctx.save(); ctx.globalCompositeOperation = 'lighter';
+      gl.addColorStop(0, `rgba(255,255,255,${cl})`); gl.addColorStop(0.15, `rgba(255,252,240,${0.8 * cl})`);
+      gl.addColorStop(0.5, `rgba(255,240,205,${0.22 * cl})`); gl.addColorStop(1, 'rgba(255,230,170,0)');
+      ctx.fillStyle = gl; ctx.beginPath(); ctx.arc(bx, by, sunR * 1.1, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+    }
+  } else {
+    if (moonVisible) paintMoonNow();
+    if (sunVisible) paintSunNow();
+  }
+  if (sunVisible) {
+    labels.push({ text: input.names.sun, x: sunPx.x, y: sunPx.y, ox: 0, oy: -sunR - 8, font: '12px system-ui, sans-serif', color: '#fde68a', align: 'center', prio: 100 });
+    if (sunAlt > 0) targets.push({ x: sunPx.x, y: sunPx.y, name: input.names.sun, detail: `${sunAlt.toFixed(1)}° · ${sunAz.toFixed(1)}°`, kind: 'sun' });
+  }
+  if (moonVisible) {
+    labels.push({ text: input.names.moon, x: mp.x, y: mp.y, ox: 0, oy: moonR + 15, font: '12px system-ui, sans-serif', color: '#e2e8f0', align: 'center', prio: 100 });
     if (moonAlt > 0) targets.push({ x: mp.x, y: mp.y, name: input.names.moon, detail: `${moonAlt.toFixed(1)}° · ${moonAz.toFixed(1)}°`, kind: 'moon' });
   }
 
@@ -503,6 +574,22 @@ export function renderEye(ctx: CanvasRenderingContext2D, w: number, h: number, i
   if (opt.ground && opt.sundial) drawSundial(ctx, P, input, { vec, k: lit?.k ?? 0, source }, states.sun.equatorial.declinationDeg, targets, labels);
 
   flushLabels(ctx, labels, w, h);
+  // فلتر شمسي: لا يُرى إلا قرص الشمس (وقرص القمر أمامه عند الكسوف)
+  if (opt.solarFilter && sunVisible) {
+    ctx.save();
+    ctx.fillStyle = '#000'; ctx.globalAlpha = 0.995; ctx.fillRect(0, 0, w, h); ctx.globalAlpha = 1;
+    const sra = states.sun.equatorial.rightAscensionHours, sdec = states.sun.equatorial.declinationDeg;
+    const proj = (ra: number, dec: number) => { const q = ofDate(ra, dec); const e = { x: 0, y: 0 }; return P.project(toDir(q.alt, q.az), e) ? e : null; };
+    const s0 = proj(sra, sdec), sn = proj(sra, sdec + (sdec > 85 ? -0.05 : 0.05)), se = proj(sra + 0.05 / Math.max(0.05, Math.cos(sdec * DEG)) / 15, sdec);
+    if (s0 && sn && se) {
+      const unit = (dx: number, dy: number) => { const l = Math.hypot(dx, dy) || 1; return { x: dx / l, y: dy / l }; };
+      const n = unit(sn.x - s0.x, sn.y - s0.y), e = unit(se.x - s0.x, se.y - s0.y), sg = sdec > 85 ? -1 : 1;
+      const jd = input.date.getTime() / 86400000 + 2440587.5;
+      paintFilteredSun(ctx, sunPx.x, sunPx.y, sunR, { nx: n.x * sg, ny: n.y * sg, ex: e.x, ey: e.y }, solarPhysical(jd, sra, sdec), jd);
+    }
+    if (moonVisible && realOverlap) { ctx.fillStyle = '#000'; ctx.beginPath(); ctx.arc(mp.x, mp.y, moonR, 0, Math.PI * 2); ctx.fill(); }
+    ctx.restore();
+  }
   ctx.restore();
   return { targets, sundial, scalePxPerDeg: pxPerDeg };
 }

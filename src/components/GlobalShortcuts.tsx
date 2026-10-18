@@ -29,10 +29,13 @@ export function GlobalShortcuts() {
         case 'KeyL': st.toggleLayer('labels'); break;
         case 'KeyC': st.toggleLayer('ecliptic'); break;
         case 'KeyA': st.toggleLayer('aurora'); break;
-        case 'KeyF':
+        case 'KeyF': {
+          const es = useEyeStore.getState();
+          if (es.open) { es.setImmersive(!es.immersive); break; } // في عين الراصد: إخفاء كل النوافذ
           if (document.fullscreenElement) void document.exitFullscreen();
           else void document.documentElement.requestFullscreen?.().catch(() => undefined);
           break;
+        }
         case 'Slash':
           if (!e.shiftKey) return;
           window.dispatchEvent(new Event(OPEN_SHORTCUTS_EVENT)); break;

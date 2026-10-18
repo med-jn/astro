@@ -20,7 +20,7 @@ const lumY = (v: number[]) => 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2];
 // ───────────────────────── ضوضاء جدولية (دورية 256) ─────────────────────────
 const NZ = new Float32Array(256 * 256);
 { let s = 1337; for (let i = 0; i < NZ.length; i++) { s = (Math.imul(s, 1664525) + 1013904223) >>> 0; NZ[i] = s / 4294967296; } }
-function nz(x: number, y: number): number {
+export function nz(x: number, y: number): number {
   const xf = Math.floor(x), yf = Math.floor(y), fx = x - xf, fy = y - yf;
   const sx = fx * fx * (3 - 2 * fx), sy = fy * fy * (3 - 2 * fy);
   const x0 = xf & 255, x1 = (xf + 1) & 255, y0 = (yf & 255) << 8, y1 = ((yf + 1) & 255) << 8;
@@ -28,7 +28,7 @@ function nz(x: number, y: number): number {
   const top = a + (b - a) * sx;
   return top + (c + (d - c) * sx - top) * sy;
 }
-function fbm(x: number, y: number, oct: number): number {
+export function fbm(x: number, y: number, oct: number): number {
   let s = 0, a = 0.5, f = 1, n = 0;
   for (let i = 0; i < oct; i++) { s += a * nz(x * f + i * 17.3, y * f + i * 9.1); n += a; a *= 0.5; f *= 2.03; }
   return s / n;
@@ -37,7 +37,7 @@ function fbm(x: number, y: number, oct: number): number {
 // ───────────────────────── التعريض ومنحنى الاستجابة ─────────────────────────
 const aces = (x: number) => Math.max(0, (x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14));
 const oetf = (v: number) => { v = Math.min(1, Math.max(0, v)); return v <= 0.0031308 ? 12.92 * v : 1.055 * Math.pow(v, 1 / 2.4) - 0.055; };
-const SAT_SKY = 1.4, SAT_GROUND = 1.0;
+const SAT_SKY = 1.25, SAT_GROUND = 1.0;
 let exposure = 1e-4;
 /**
  * التعريض من الإضاءة الكلية على سطح أفقي ℓ (لوكس): بطاقة رمادية 18% تُعرَّض إلى 0.36 في الضوء الكامل (ℓ ≥ 6·10⁴)،
@@ -61,9 +61,13 @@ export function toCameraRGB(r: number, g: number, b: number, out: Uint8ClampedAr
   // رؤية خافتة (بيرْكنجي): عند السطوع المنخفض تميل الألوان إلى الأزرق وتفقد تشبّعها
   const sc = 1 - smoothstep(0.0004, 0.025, y);
   if (sc > 0) { const yy = y * 1.15; r += (yy * 0.86 - r) * sc; g += (yy * 0.96 - g) * sc; b += (yy * 1.16 - b) * sc; }
-  out[off] = Math.round(255 * oetf(aces(r)));
-  out[off + 1] = Math.round(255 * oetf(aces(g)));
-  out[off + 2] = Math.round(255 * oetf(aces(b)));
+  r = aces(r); g = aces(g); b = aces(b);
+  // أنصاف الألوان الساطعة تميل إلى البياض (كما في الكاميرات): لا يبقى الأفق عند الشروق أصفر ليمونياً
+  const wh = smoothstep(0.5, 1.0, Math.max(r, g, b)) * 0.65, yy = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  r += (yy - r) * wh; g += (yy - g) * wh; b += (yy - b) * wh;
+  out[off] = Math.round(255 * oetf(r));
+  out[off + 1] = Math.round(255 * oetf(g));
+  out[off + 2] = Math.round(255 * oetf(b));
 }
 
 // ───────────────────────── نسيج السماء وإضاءة الأرض ─────────────────────────
@@ -74,6 +78,9 @@ interface Light { sunDir: V3; sunE: number[]; moonDir: V3; moonE: number[]; diff
 let light: Light = { sunDir: [0, 0, 1], sunE: [0, 0, 0], moonDir: [0, 0, 1], moonE: [0, 0, 0], diffuse: [0, 0, 0] };
 let shadowKValue = 0.3;
 let lastEll = 1;
+let skyCapY = 1e9;
+/** التعريض الحالي (الأرقام الخطية → شاشة) */
+export const getExposure = () => exposure;
 let skyVersion = 0;
 /** الإضاءة الكلية الحالية على سطح أفقي (لوكس نموذجي) */
 export const getIlluminance = () => lastEll;
@@ -91,21 +98,26 @@ export function buildSkyTexture(inp: DomeSkyInput, version: number, nowMs: numbe
   skyTexKey = key; skyTexStamp = nowMs;
 
   // إضاءة الأرض: السماء المنتشرة (تكامل نصف الكرة) + الشمس والقمر المباشران
-  const E = [0, 0, 0];
-  const dTheta = 15 * DEG;
-  for (let k = 0; k < 6; k++) {
-    const theta = (k + 0.5) * dTheta;
-    const w = Math.cos(theta) * Math.sin(theta) * dTheta;
-    for (let a = 0; a < 4; a++) {
-      skyLinearAt(90 - theta * RAD, inp.sunAz + a * 90, inp.sunAz, inp.moonAz, inp.sunFraction, acc3);
-      for (let c = 0; c < 3; c++) E[c] += (2 * Math.PI * w * acc3[c]) / 4;
+  const diffuseFor = (frac: number): number[] => {
+    const E = [0, 0, 0];
+    const dTheta = 15 * DEG;
+    for (let k = 0; k < 6; k++) {
+      const theta = (k + 0.5) * dTheta;
+      const w = Math.cos(theta) * Math.sin(theta) * dTheta;
+      for (let a = 0; a < 4; a++) {
+        skyLinearAt(90 - theta * RAD, inp.sunAz + a * 90, inp.sunAz, inp.moonAz, frac, acc3);
+        for (let c = 0; c < 3; c++) E[c] += (2 * Math.PI * w * acc3[c]) / 4;
+      }
     }
-  }
-  const sunE = [0, 0, 0], moonE = [0, 0, 0];
+    return E;
+  };
+  const E = diffuseFor(inp.sunFraction);
+  const sunBase = [0, 0, 0], moonE = [0, 0, 0];
   if (inp.sunAlt > 0) {
     const { rgb } = directSunLight(inp.sunAlt);
-    for (let c = 0; c < 3; c++) sunE[c] = SKY_CONSTANTS.E_SUN * rgb[c] * inp.sunFraction; // عمودية على الأشعة
+    for (let c = 0; c < 3; c++) sunBase[c] = SKY_CONSTANTS.E_SUN * rgb[c];
   }
+  const sunE = sunBase.map((v) => v * inp.sunFraction);
   if (inp.moonAlt > 0 && inp.moonPhase > 0.04) {
     const { rgb } = directSunLight(inp.moonAlt);
     const k = inp.moonPhase;
@@ -113,18 +125,27 @@ export function buildSkyTexture(inp: DomeSkyInput, version: number, nowMs: numbe
   }
   light = { sunDir: dirFromAltAz(inp.sunAlt, inp.sunAz), sunE, moonDir: dirFromAltAz(inp.moonAlt, inp.moonAz), moonE, diffuse: E };
   const sinS = Math.max(0, Math.sin(inp.sunAlt * DEG)), sinM = Math.max(0, Math.sin(inp.moonAlt * DEG));
-  const dirH = [sunE[0] * sinS + moonE[0] * sinM, sunE[1] * sinS + moonE[1] * sinM, sunE[2] * sinS + moonE[2] * sinM];
-  const tot = [E[0] + dirH[0], E[1] + dirH[1], E[2] + dirH[2]];
-  lastEll = lumY(tot);
+  const horiz = (frac: number, Ed: number[]) => lumY([Ed[0] + (sunBase[0] * frac) * sinS + moonE[0] * sinM, Ed[1] + (sunBase[1] * frac) * sinS + moonE[1] * sinM, Ed[2] + (sunBase[2] * frac) * sinS + moonE[2] * sinM]);
+  const ellNow = horiz(inp.sunFraction, E);
+  // حالة التكيّف: العين/الحسّاس لا يتكيّف لحظياً مع عتمة الكسوف؛ نمزج 70% من الإضاءة قبل الكسوف و30% من الحالية
+  const ellRef = inp.sunFraction >= 0.999 ? ellNow : horiz(1, diffuseFor(1));
+  const adapt = (ref: number, now: number) => Math.exp(0.7 * Math.log(Math.max(ref, 1e-9)) + 0.3 * Math.log(Math.max(now, 1e-9)));
+  lastEll = adapt(ellRef, ellNow);
   exposure = exposureFor(lastEll);
   // مقياس السماء: عند الغروب تكون السماء أسطع بكثير من الأرض، فيُؤخذ الأدنى من تعريضَي الأرض والسماء (لا تنفجر السماء)
-  let lgSky = 0;
+  let lgSky = 0, lgSkyRef = 0;
   const probes: [number, number][] = [[90, 0], [50, 180], [50, 90], [25, 150], [25, 210]];
   for (const [e, da] of probes) {
     skyLinearAt(e, inp.sunAz + da, inp.sunAz, inp.moonAz, inp.sunFraction, acc3);
     lgSky += Math.log(Math.max(1e-6, lumY(acc3)));
+    skyLinearAt(e, inp.sunAz + da, inp.sunAz, inp.moonAz, 1, acc3);
+    lgSkyRef += Math.log(Math.max(1e-6, lumY(acc3)));
   }
-  exposure = Math.min(exposure, 0.11 / Math.exp(lgSky / probes.length));
+  const laSky = Math.exp((0.7 * lgSkyRef + 0.3 * lgSky) / probes.length);
+  exposure = Math.min(exposure, 0.11 / laSky);
+  // سقف سطوع الهالة حول الشمس (لا تنفجر إلى بياض يبتلع القرص)
+  skyCapY = 14 * laSky;
+  const tot = [E[0] + sunE[0] * sinS + moonE[0] * sinM, E[1] + sunE[1] * sinS + moonE[1] * sinM, E[2] + sunE[2] * sinS + moonE[2] * sinM];
   shadowKValue = Math.max(0.04, Math.min(1, lumY(E) / Math.max(1e-9, lumY(tot))));
   void tmp4;
 
@@ -132,7 +153,8 @@ export function buildSkyTexture(inp: DomeSkyInput, version: number, nowMs: numbe
     const e = elOf(j);
     for (let i = 0; i < AZN; i++) {
       skyLinearAt(e, (i * 360) / AZN, inp.sunAz, inp.moonAz, inp.sunFraction, acc3);
-      toCameraRGB(acc3[0], acc3[1], acc3[2], skyTex, (j * AZN + i) * 4);
+      const capK = 1 / (1 + lumY(acc3) / skyCapY);
+      toCameraRGB(acc3[0] * capK, acc3[1] * capK, acc3[2] * capK, skyTex, (j * AZN + i) * 4);
       skyTex[(j * AZN + i) * 4 + 3] = 255;
     }
   }
@@ -172,9 +194,9 @@ function mix3(a: number[], b: number[], t: number, out: number[]): void { for (l
 
 /** ارتفاع التلال زاوياً (درجات) عند سمت معيّن: سلسلة بعيدة عالية، وأخرى قريبة منخفضة بخط أشجار خشن */
 function ridges(az: number, out: number[]): void {
-  const far = 0.7 + 3.6 * Math.pow(fbm(az * 0.09, 3.1, 4), 1.35);
-  const nearBase = 0.12 + 1.15 * fbm(az * 0.21, 41.7, 3);
-  const trees = 0.2 * (nz(az * 2.6, 7.7) - 0.5) + 0.09 * (nz(az * 8.5, 2.2) - 0.5) + 0.035 * (nz(az * 27, 5.1) - 0.5);
+  const far = 0.25 + 1.5 * Math.pow(fbm(az * 0.09, 3.1, 4), 1.35);
+  const nearBase = 0.05 + 0.5 * fbm(az * 0.21, 41.7, 3);
+  const trees = 0.09 * (nz(az * 2.6, 7.7) - 0.5) + 0.04 * (nz(az * 8.5, 2.2) - 0.5) + 0.016 * (nz(az * 27, 5.1) - 0.5);
   out[0] = far; out[1] = Math.max(0.03, nearBase + trees);
 }
 
@@ -208,7 +230,7 @@ export function fillBackgroundPixels(P: Projector, opt: BgOptions, plate: BgPlat
       sampleSky(0.4, az, haze);
 
       if (u >= 0) {
-        if (u > 0.08) continue; // أعلى من أعلى تلّة ممكنة (≈4.4°)
+        if (u > 0.04) continue; // أعلى من أعلى تلّة ممكنة (≈2.3°)
         // تلال بعيدة وقريبة فوق الأفق الهندسي
         ridges(az, ridge2);
         const hFar = ridge2[0] * DEG, hNear = ridge2[1] * DEG;
@@ -220,7 +242,7 @@ export function fillBackgroundPixels(P: Projector, opt: BgOptions, plate: BgPlat
         irradiate(RHO_FAR, 0, 0.6, 0.8, 1, acc);
         toCameraRGB(acc[0], acc[1], acc[2], bytes, 0, SAT_GROUND);
         const hv = Math.min(1, u / Math.max(1e-5, hFar));
-        const rel = nz(az * 14, 3.3) * 0.5 + nz(az * 41, 8.8) * 0.5;
+        const rel = nz(az * 14, u * 800) * 0.5 + nz(az * 41, u * 2300 + 8.8) * 0.5;
         mix3([bytes[0], bytes[1], bytes[2]], haze, 0.62 + 0.14 * hv - 0.12 * rel, col);
         let a = farA;
         if (nearA > 0) {

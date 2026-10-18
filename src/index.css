@@ -805,3 +805,11 @@ input[type='range'].slider {
 .sc-keys { display: flex; flex-wrap: wrap; gap: 3px; justify-content: flex-end; direction: ltr; }
 .sc-guide kbd { font-family: var(--font-mono); font-size: 11px; min-width: 20px; text-align: center; padding: 2px 6px; background: var(--bg-2); color: var(--text-1); border: 1px solid var(--line-strong); border-bottom-width: 2px; border-radius: 5px; }
 .sc-note { font-size: 11px; color: var(--text-3); line-height: 1.6; }
+
+/* ===== عين الراصد: التتبع وملء الشاشة ===== */
+.eye-btn[data-on='true'] { background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent-text); }
+.eye-top-actions { display: flex; gap: 6px; }
+.eye-root[data-immersive='true'] .eye-top, .eye-root[data-immersive='true'] .eye-dial { transition: opacity 0.35s; }
+.eye-root[data-immersive='true'][data-chrome='false'] .eye-top, .eye-root[data-immersive='true'][data-chrome='false'] .eye-dial { opacity: 0; pointer-events: none; }
+.eye-root[data-immersive='true'][data-chrome='false'] .eye-canvas { cursor: none; }
+body.eye-immersive .controls-panel, body.eye-immersive .menu-fab, body.eye-immersive .drawer-backdrop, body.eye-immersive .info-card { display: none !important; }
