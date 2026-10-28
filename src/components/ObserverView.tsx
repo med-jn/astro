@@ -4,13 +4,22 @@ import * as Astronomy from 'astronomy-engine';
 import { useSimulationStore } from '../state/store';
 import { useEyeStore, type LookKind, type TrackTarget } from '../state/eye';
 import { getLoadedZodiac } from '../core/zodiac';
+import { getAllLunarMansions } from '../core/mansions';
+import { eclipticLongitudeToEquatorial } from '../core/eclipticTransform';
 import { getStarByIdMap } from '../core/starCatalog';
 import { makeSkyFrame, placeRaDecJ2000 } from '../core/skyModel';
 import { useI18n, type TKey } from '../i18n';
-import { mansionName } from '../i18n/names';
+import { groupName, JUPITER_MOON_NAMES, mansionName, zodiacName } from '../i18n/names';
+import { getZodiacNameAr } from '../core/zodiacNamesAr';
+import { ZODIAC_ORDER, type ZodiacKey } from '../core/zodiac';
+import { computeGroupCenter, getGroupMemberHips } from '../core/starGroups';
+import { magnificationAt, fovForMagnification } from '../render/eyeScale';
+import { selectionTarget } from '../render/eyeSelection';
+import type { PlanetPhys } from '../render/eyePlanets';
 import { PLANET_LABELS_AR, getAllPlanetStates, getGMSTDeg, getMoonState, getSunState } from '../core/bodies';
 import { getMeanObliquityDeg } from '../core/eclipticTransform';
-import { DEFAULT_CAMERA, clampCamera, dragCamera, fovLimits, makeProjector, zoomCameraAt, type Camera } from '../core/camera';
+import { DEFAULT_CAMERA, clampCamera, dirFromAltAz, dragCamera, fovLimits, makeProjector, zoomCameraAt, type Camera, type V3 } from '../core/camera';
+import { getGpuStamp } from '../render/eyeBackground';
 import { renderEye, type EyeInput, type EyeStates, type EyeTarget, type SundialReadout } from '../render/eyeRenderer';
 import { drawMoon, drawPlanetDot, type RenderOutput } from '../render/skyRenderer';
 import type { ObserverLocation, PlanetName } from '../types/astro';
@@ -24,13 +33,34 @@ const EYE_HEIGHT_M = 1.7;
 const DIAL_DISTANCE_M = 4.2; // مركز الساعة الشمسية جنوب الراصد (انظر eyeRenderer)
 const CARDINAL_KEYS: TKey[] = ['eye_c_n', 'eye_c_ne', 'eye_c_e', 'eye_c_se', 'eye_c_s', 'eye_c_sw', 'eye_c_w', 'eye_c_nw'];
 
-interface Hud { az: number; alt: number; fov: number; sundial: SundialReadout | null }
+interface Hud { az: number; alt: number; fov: number; mag: number; sundial: SundialReadout | null }
 interface Card { name: string; detail: string }
 interface Tween { az0: number; alt0: number; fov0: number; az1: number; alt1: number; fov1: number; t0: number }
 const LOOK_CODES = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'];
 const ZOOM_IN_CODES = ['Equal', 'NumpadAdd', 'PageUp'];
 const ZOOM_OUT_CODES = ['Minus', 'NumpadSubtract', 'PageDown'];
 const HOLD_CODES = [...LOOK_CODES, ...ZOOM_IN_CODES, ...ZOOM_OUT_CODES];
+
+const PLANET_BODIES = ['Mercury', 'Venus', 'Mars', 'Jupiter', 'Saturn', 'Uranus', 'Neptune'] as const;
+/** المسافة والطور ومحور الدوران وأقمار المشتري من astronomy-engine (للقرص والحلقات والأقمار في العين) */
+function computePhysical(time: ReturnType<typeof Astronomy.MakeTime>): Record<string, PlanetPhys> | undefined {
+  const out: Record<string, PlanetPhys> = {};
+  try {
+    for (const name of PLANET_BODIES) {
+      const body = Astronomy.Body[name];
+      const gv = Astronomy.GeoVector(body, time, true);
+      const ill = Astronomy.Illumination(body, time);
+      let pole: V3 | null = null;
+      try { const ax = Astronomy.RotationAxis(body, time); pole = [ax.north.x, ax.north.y, ax.north.z]; } catch { pole = null; }
+      let moons: PlanetPhys['moons'] = null;
+      if (name === 'Jupiter') {
+        try { const jm = Astronomy.JupiterMoons(time); moons = (['io', 'europa', 'ganymede', 'callisto'] as const).map((k) => ({ key: k, rel: [jm[k].x, jm[k].y, jm[k].z] as V3 })); } catch { moons = null; }
+      }
+      out[name] = { distAu: gv.Length(), phaseFraction: ill.phase_fraction, geoEqj: [gv.x, gv.y, gv.z], poleEqj: pole, moons };
+    }
+  } catch { return undefined; }
+  return out;
+}
 
 function computeStates(date: Date, obs: ObserverLocation): EyeStates {
   const time = Astronomy.MakeTime(date);
@@ -40,6 +70,7 @@ function computeStates(date: Date, obs: ObserverLocation): EyeStates {
     planets: getAllPlanetStates(time, obs),
     gmstDeg: getGMSTDeg(time),
     obliquityDeg: getMeanObliquityDeg(time),
+    physical: computePhysical(time),
   };
 }
 
@@ -68,7 +99,7 @@ export function ObserverView({ onFrame }: { onFrame?: (o: RenderOutput) => void 
   const langRef = useRef({ lang, t });
   langRef.current = { lang, t };
 
-  const [hud, setHud] = useState<Hud>({ az: DEFAULT_CAMERA.azDeg, alt: DEFAULT_CAMERA.altDeg, fov: DEFAULT_CAMERA.fovDeg, sundial: null });
+  const [hud, setHud] = useState<Hud>({ az: DEFAULT_CAMERA.azDeg, alt: DEFAULT_CAMERA.altDeg, fov: DEFAULT_CAMERA.fovDeg, mag: 0.5, sundial: null });
   const [card, setCard] = useState<Card | null>(null);
 
   const requestClose = () => {
@@ -121,6 +152,7 @@ export function ObserverView({ onFrame }: { onFrame?: (o: RenderOutput) => void 
     let hudStamp = 0;
     let lookN = useEyeStore.getState().lookCmd?.n ?? 0;
     let fovN = useEyeStore.getState().fovCmd?.n ?? 0;
+    let magN = useEyeStore.getState().magCmd?.n ?? 0;
     const helpers = { drawMoon, drawPlanetDot };
 
     const touch = () => { lastInteractRef.current = performance.now(); tweenRef.current = null; };
@@ -177,6 +209,43 @@ export function ObserverView({ onFrame }: { onFrame?: (o: RenderOutput) => void 
       tweenRef.current = { az0: c.azDeg, alt0: c.altDeg, fov0: c.fovDeg, az1: az, alt1: alt, fov1: fov, t0: performance.now() };
     };
 
+    // الانتقال إلى مكان وحقل رؤية محددين بسلاسة (اختيار من القوائم أو البحث)
+    const gotoView = (az: number, alt: number, fov: number) => {
+      const c = camRef.current, [fLo, fHi] = fovLimits(c.projection);
+      lastInteractRef.current = performance.now(); zoomTarget = null; velAz = 0; velAlt = 0;
+      tweenRef.current = { az0: c.azDeg, alt0: c.altDeg, fov0: c.fovDeg, az1: az, alt1: Math.max(-5, alt), fov1: Math.min(fHi, Math.max(fLo, fov)), t0: performance.now() };
+    };
+    const unit3 = (altDeg: number, azDeg: number): V3 => dirFromAltAz(altDeg, azDeg);
+    const angleBetween = (a: V3, b: V3) => Math.acos(Math.max(-1, Math.min(1, a[0] * b[0] + a[1] * b[1] + a[2] * b[2]))) * (180 / Math.PI);
+    const zodiacInfo = (key: string) => {
+      const fr = frameRef.current, z = getLoadedZodiac()[key];
+      if (!fr || !z) return null;
+      const pts: V3[] = []; let mx = 0, my = 0, mz = 0;
+      for (const seg of z.segments) for (const q of seg) { if (!q) continue; const hh = placeRaDecJ2000(fr, q[0], q[1]); const d = unit3(hh.altDeg, hh.azDeg); pts.push(d); mx += d[0]; my += d[1]; mz += d[2]; }
+      const l = Math.hypot(mx, my, mz); if (!l || !pts.length) return null;
+      const c: V3 = [mx / l, my / l, mz / l];
+      let rad = 0; for (const d of pts) rad = Math.max(rad, angleBetween(c, d));
+      return { az: ((Math.atan2(c[0], c[1]) * 180) / Math.PI + 360) % 360, alt: (Math.asin(c[2]) * 180) / Math.PI, rad };
+    };
+    let prevSel = { z: useSimulationStore.getState().selectedZodiacs.map(String), m: [...useSimulationStore.getState().selectedMansionIndices], g: [...useSimulationStore.getState().selectedGroupIds], s: useSimulationStore.getState().highlightedStarId };
+    const followSelection = (st2: ReturnType<typeof useSimulationStore.getState>) => {
+      const fr = frameRef.current, so = statesRef.current;
+      const cur = { z: st2.selectedZodiacs.map(String), m: [...st2.selectedMansionIndices], g: [...st2.selectedGroupIds], s: st2.highlightedStarId };
+      if (fr && so) {
+        const byId = getStarByIdMap();
+        const tgt = selectionTarget(prevSel, cur, {
+          starById: (id) => byId.get(id),
+          place: (ra, dec) => { const hh = placeRaDecJ2000(fr, ra, dec); return { az: hh.azDeg, alt: hh.altDeg }; },
+          groupCenter: computeGroupCenter,
+          groupMembers: getGroupMemberHips,
+          zodiac: zodiacInfo,
+          mansionMid: (idx) => { const mans = getAllLunarMansions()[idx]; return mans ? eclipticLongitudeToEquatorial(mans.startLongitudeDeg + 6.65, so.obliquityDeg) : null; },
+        });
+        if (tgt) { useEyeStore.getState().setTrack(null); gotoView(tgt.az, tgt.alt, tgt.fov); }
+      }
+      prevSel = cur;
+    };
+
     const loop = () => {
       raf = requestAnimationFrame(loop);
       const now = performance.now();
@@ -193,6 +262,7 @@ export function ObserverView({ onFrame }: { onFrame?: (o: RenderOutput) => void 
       const es = useEyeStore.getState();
       if (es.projection !== camRef.current.projection) camRef.current = clampCamera({ ...camRef.current, projection: es.projection });
       if (es.fovCmd && es.fovCmd.n !== fovN) { fovN = es.fovCmd.n; touch(); camRef.current = clampCamera({ ...camRef.current, fovDeg: es.fovCmd.value }); }
+      if (es.magCmd && es.magCmd.n !== magN) { magN = es.magCmd.n; touch(); zoomTarget = { fov: fovForMagnification(camRef.current.projection, sizeRef.current.h, es.magCmd.value), x: sizeRef.current.w / 2, y: sizeRef.current.h / 2 }; }
       if (es.lookCmd && es.lookCmd.n !== lookN) { lookN = es.lookCmd.n; startLook(es.lookCmd.kind); }
 
       // حركة الكاميرا بزمن الإطار
@@ -212,7 +282,7 @@ export function ObserverView({ onFrame }: { onFrame?: (o: RenderOutput) => void 
         if (tg) {
           const kT = 1 - Math.exp(-dt / 0.1);
           let dA = tg.az - c.azDeg; if (dA > 180) dA -= 360; if (dA < -180) dA += 360;
-          c = clampCamera({ ...c, azDeg: c.azDeg + dA * kT, altDeg: c.altDeg + (tg.alt - c.altDeg) * kT });
+          c = clampCamera({ ...c, azDeg: c.azDeg + dA * kT, altDeg: c.altDeg + (Math.max(tg.alt, -2.5) - c.altDeg) * kT }); // الجرم الغارب لا ينزل تحت الأرض: تدور الكاميرا مع مستوى الأفق (أو أدنى بقليل)
           velAz = 0; velAlt = 0; tweenRef.current = null; lastInteractRef.current = now;
         } else if (!dragging) {
           const sp = Math.min(70, Math.max(4, c.fovDeg * 0.5)); // درجة/ث تتناسب مع المجال
@@ -255,6 +325,7 @@ export function ObserverView({ onFrame }: { onFrame?: (o: RenderOutput) => void 
         onFrameRef.current?.({ sun: s.sun, moon: s.moon, planets: s.planets, gmstDeg: s.gmstDeg, hitTargets: [] });
       }
       const states = statesRef.current;
+      followSelection(st);
 
       const cam = camRef.current;
       const L = st.layers;
@@ -263,7 +334,7 @@ export function ObserverView({ onFrame }: { onFrame?: (o: RenderOutput) => void 
       const bgScale = busy ? 0.18 : 0.45;
       const key = [
         cam.azDeg.toFixed(3), cam.altDeg.toFixed(3), cam.fovDeg.toFixed(3), cam.rollDeg, cam.projection, W, H, dpr, bgScale, sKey, lg,
-        L.stars, L.planets, L.labels, L.ecliptic, L.aurora, es.ground, es.sundial, es.altAzGrid, es.solarFilter,
+        L.stars, L.planets, L.labels, L.ecliptic, L.aurora, es.ground, es.sundial, es.altAzGrid, es.solarFilter, es.atmVersion, getGpuStamp(),
         st.auroraKp, st.selectedZodiacs.join(','), st.selectedMansionIndices.join(','), st.selectedGroupIds.join(','), st.highlightedStarId,
       ].join('|');
 
@@ -283,6 +354,10 @@ export function ObserverView({ onFrame }: { onFrame?: (o: RenderOutput) => void 
             planet: (id) => (lg === 'ar' ? PLANET_LABELS_AR[id as PlanetName] ?? id : id),
             cardinals: CARDINAL_KEYS.map((k) => tt(k)),
             mansion: (index, nameAr) => mansionName({ index, nameAr }, lg),
+            group: (g) => groupName(g, lg),
+            zodiac: (key) => zodiacName(key, getZodiacNameAr(key as ZodiacKey, Math.max(0, ZODIAC_ORDER.indexOf(key as ZodiacKey))), lg),
+            jovian: (k) => JUPITER_MOON_NAMES[k]?.[lg] ?? k,
+            belowHorizon: tt('eye_below_horizon'),
           },
           bgScale,
         };
@@ -294,7 +369,7 @@ export function ObserverView({ onFrame }: { onFrame?: (o: RenderOutput) => void 
       if (now - hudStamp > 250) {
         hudStamp = now;
         es.mirrorFov(cam.fovDeg);
-        setHud({ az: cam.azDeg, alt: cam.altDeg, fov: cam.fovDeg, sundial: outRef.current });
+        setHud({ az: cam.azDeg, alt: cam.altDeg, fov: cam.fovDeg, mag: magnificationAt(makeProjector(cam, W, H)), sundial: outRef.current });
       }
     };
     raf = requestAnimationFrame(loop);
@@ -395,6 +470,7 @@ export function ObserverView({ onFrame }: { onFrame?: (o: RenderOutput) => void 
       let used = true;
       switch (e.code) {
         case 'Home': useEyeStore.getState().setTrack(null); startLook('home'); break;
+        case 'Digit0': useEyeStore.getState().setMagnification(1); break;
         case 'KeyS': if (e.shiftKey) useEyeStore.getState().setTrack({ kind: 'sun' }); else useEyeStore.getState().look('sun'); break;
         case 'KeyM': if (e.shiftKey) useEyeStore.getState().setTrack({ kind: 'moon' }); else useEyeStore.getState().look('moon'); break;
         case 'KeyX': useEyeStore.getState().setTrack(null); break;
@@ -441,7 +517,7 @@ export function ObserverView({ onFrame }: { onFrame?: (o: RenderOutput) => void 
       <div className="eye-top">
         <div className="eye-title">
           <strong>{t('nav_eye')}</strong>
-          <span className="eye-mono">{t('eye_hud', { az: hud.az.toFixed(1), alt: hud.alt.toFixed(1), fov: hud.fov.toFixed(hud.fov < 10 ? 2 : 1) })}</span>
+          <span className="eye-mono">{t('eye_hud', { az: hud.az.toFixed(1), alt: hud.alt.toFixed(1), fov: hud.fov.toFixed(hud.fov < 10 ? 2 : 1), mag: hud.mag < 10 ? hud.mag.toFixed(2) : hud.mag.toFixed(0) })}</span>
         </div>
         <div className="eye-top-actions">
           <button className="eye-btn eye-btn-icon" onClick={() => useEyeStore.getState().setImmersive(!immersive)} aria-label={t(immersive ? 'eye_immersive_exit' : 'eye_immersive')} title={t(immersive ? 'eye_immersive_exit' : 'eye_immersive')}>

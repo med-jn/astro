@@ -31,6 +31,7 @@ export const SHORTCUTS: ShortcutDef[] = [
   { group: 'eye', keys: ['←', '→', '↑', '↓'], label: 'sc_eye_look' },
   { group: 'eye', keys: ['+', '−', 'PgUp', 'PgDn'], label: 'sc_eye_zoom' },
   { group: 'eye', keys: ['Home'], label: 'sc_eye_home' },
+  { group: 'eye', keys: ['0'], label: 'sc_eye_natural' },
   { group: 'eye', keys: ['Shift + S', 'Shift + M'], label: 'sc_eye_track' },
   { group: 'eye', keys: ['X'], label: 'sc_eye_untrack' },
   { group: 'eye', keys: ['V'], label: 'sc_eye_filter' },

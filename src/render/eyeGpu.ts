@@ -25,6 +25,8 @@ export interface GpuBackground {
   drawGround(ctx: CanvasRenderingContext2D, f: GpuFrame): void;
   setSkyTexture(data: Uint8ClampedArray, w: number, h: number): void;
   lost(): boolean;
+  /** يزيد عند اكتمال تحميل الأنسجة (ليعيد المشغّل الرسم) */
+  ready(): number;
 }
 
 const VERT = `#version 300 es
@@ -79,6 +81,8 @@ void main() {
 
 const GROUND_FRAG = COMMON + `
 uniform sampler2D uNz;
+uniform sampler2D uGrassA, uGrassN; // meadow albedo (sRGB->linear in hardware) and tangent-space normal
+uniform float uTexReady;
 uniform float uExposure, uEyeH, uPxRad;
 uniform vec3 uPlate;   // e, n, r
 uniform vec3 uSunDir, uSunE, uMoonDir, uMoonE, uDiffuse;
@@ -115,6 +119,7 @@ vec3 irradiate(vec3 rho, vec3 n, float k) {
   float sky = 0.55 + 0.45 * n.z;
   return k * rho * (uSunE * cs + uMoonE * cm + uDiffuse * sky) / 3.141592653589793;
 }
+vec2 groundPt(vec2 frag) { vec3 dd = unprojectDir(frag); float uu = min(dd.z, -3e-3); return (uEyeH / -uu) * dd.xy; }
 float detailFade(float freq, float fp) { return 1.0 - smoothstep(0.3, 1.15, freq * fp); }
 
 // angular ridge heights (deg): far range, and a nearer one with a treeline and crowns
@@ -199,6 +204,23 @@ void main() {
       float dx = nzv((g + vec2(e, 0.0)) * 7.5 + vec2(11.0, 4.0)) - b3, dy = nzv((g + vec2(0.0, e)) * 7.5 + vec2(11.0, 4.0)) - b3;
       n = normalize(vec3(-dx * nf * 1.8, -dy * nf * 1.8, 1.0));
     }
+    if (uTexReady > 0.5) {
+      // real texture path: planar mapping on the ground plane, mipmapped + anisotropic via analytic gradients
+      vec2 dgx = groundPt(frag + vec2(1.0, 0.0)) - g, dgy = groundPt(frag + vec2(0.0, 1.0)) - g;
+      vec3 a1 = textureGrad(uGrassA, g, dgx, dgy).rgb;
+      vec3 a2 = textureGrad(uGrassA, g * 0.137 + vec2(0.31, 0.57), dgx * 0.137, dgy * 0.137).rgb;
+      float m2 = pow(clamp(dot(a2, vec3(0.2126, 0.7152, 0.0722)) / 0.06, 0.45, 2.2), 0.6);   // second scale breaks repetition
+      vec3 grass = a1 * m2;
+      { float lg = dot(grass, vec3(0.2126, 0.7152, 0.0722)); grass = mix(vec3(lg), grass, 0.7) * vec3(1.06, 0.97, 0.9) * 0.66 + vec3(0.0, 0.0, 0.004); } // real chlorophyll albedo: darker, less saturated, some blue
+      grass = mix(grass, grass * vec3(2.7, 2.1, 1.1) + vec3(0.018, 0.012, 0.004), dry * 0.8); // dry patches
+      float lumA = min(dot(a1, vec3(0.2126, 0.7152, 0.0722)), 0.11);
+      vec3 soilC = vec3(0.17, 0.13, 0.092) * (0.45 + 6.0 * lumA);
+      vec3 gravC = vec3(0.15, 0.14, 0.125) * (0.5 + 5.0 * lumA);
+      rho = mix(mix(grass, soilC, soilW), gravC, gravW);
+      k = 1.0;
+      vec3 nt = textureGrad(uGrassN, g, dgx, dgy).xyz * 2.0 - 1.0;
+      n = normalize(vec3(nt.xy, max(nt.z, 0.25)));
+    }
     // sundial plate
     vec2 pl = g - uPlate.xy; float rr = length(pl);
     if (rr < uPlate.z + 0.05) {
@@ -208,8 +230,8 @@ void main() {
         vec2 q = abs(fract(pl / 0.5) - 0.5);
         float joint = min(0.5 - q.x, 0.5 - q.y) < 0.012 ? 0.62 : 1.0;
         float chamfer = rr > uPlate.z - 0.03 ? 1.12 : 1.0;
-        rho = vec3(0.36, 0.345, 0.315); k = grain * vein * joint * chamfer; n = vec3(0.0, 0.0, 1.0);
-      } else { rho = vec3(0.36, 0.345, 0.315); k = 0.22; }
+        rho = vec3(0.3, 0.29, 0.265); k = grain * vein * joint * chamfer; n = vec3(0.0, 0.0, 1.0);
+      } else { rho = vec3(0.3, 0.29, 0.265); k = 0.22; }
     }
     vec3 lit = camera(irradiate(rho, n, k), 1.0);
     float f = 1.0 - exp(-t / 3200.0);
@@ -264,6 +286,29 @@ export function createGpuBackground(): GpuBackground | null {
   G.texParameteri(G.TEXTURE_2D, G.TEXTURE_MIN_FILTER, G.LINEAR); G.texParameteri(G.TEXTURE_2D, G.TEXTURE_MAG_FILTER, G.LINEAR);
   G.texParameteri(G.TEXTURE_2D, G.TEXTURE_WRAP_S, G.REPEAT); G.texParameteri(G.TEXTURE_2D, G.TEXTURE_WRAP_T, G.CLAMP_TO_EDGE);
   let haveSky = false;
+  // meadow textures (loaded asynchronously; until then the procedural path is used)
+  const BASE: string = (typeof import.meta !== 'undefined' && (import.meta as unknown as { env?: { BASE_URL?: string } }).env?.BASE_URL) || '/';
+  const grassA = G.createTexture(), grassN = G.createTexture();
+  let texReady = 0;
+  const aniso = G.getExtension('EXT_texture_filter_anisotropic');
+  const loadTex = (url: string, tex: WebGLTexture | null, internal: number, done: () => void) => {
+    const img = new Image();
+    img.onload = () => {
+      if (contextLost) return;
+      G.bindTexture(G.TEXTURE_2D, tex);
+      G.pixelStorei(G.UNPACK_FLIP_Y_WEBGL, false);
+      G.texImage2D(G.TEXTURE_2D, 0, internal, G.RGBA, G.UNSIGNED_BYTE, img);
+      G.generateMipmap(G.TEXTURE_2D);
+      G.texParameteri(G.TEXTURE_2D, G.TEXTURE_MIN_FILTER, G.LINEAR_MIPMAP_LINEAR); G.texParameteri(G.TEXTURE_2D, G.TEXTURE_MAG_FILTER, G.LINEAR);
+      G.texParameteri(G.TEXTURE_2D, G.TEXTURE_WRAP_S, G.REPEAT); G.texParameteri(G.TEXTURE_2D, G.TEXTURE_WRAP_T, G.REPEAT);
+      if (aniso) G.texParameterf(G.TEXTURE_2D, aniso.TEXTURE_MAX_ANISOTROPY_EXT, Math.min(16, G.getParameter(aniso.MAX_TEXTURE_MAX_ANISOTROPY_EXT) as number));
+      done();
+    };
+    img.src = url;
+  };
+  let loaded = 0;
+  loadTex(`${BASE}textures/ground_albedo.jpg`, grassA, G.SRGB8_ALPHA8, () => { if (++loaded === 2) texReady = 1; });
+  loadTex(`${BASE}textures/ground_normal.png`, grassN, G.RGBA8, () => { if (++loaded === 2) texReady = 1; });
 
   const loc = (p: WebGLProgram, n: string) => G.getUniformLocation(p, n);
   const KIND = { stereographic: 0, perspective: 1, equidistant: 2 } as const;
@@ -287,11 +332,13 @@ export function createGpuBackground(): GpuBackground | null {
     G.disable(G.BLEND); G.disable(G.DEPTH_TEST);
     G.activeTexture(G.TEXTURE0); G.bindTexture(G.TEXTURE_2D, skyTex);
     G.activeTexture(G.TEXTURE1); G.bindTexture(G.TEXTURE_2D, nzTex);
+    if (texReady) { G.activeTexture(G.TEXTURE2); G.bindTexture(G.TEXTURE_2D, grassA); G.activeTexture(G.TEXTURE3); G.bindTexture(G.TEXTURE_2D, grassN); }
     G.bindVertexArray(vao);
   };
 
   return {
     lost: () => contextLost || G.isContextLost(),
+    ready: () => texReady,
     setSkyTexture(data, w, h) {
       G.activeTexture(G.TEXTURE0); G.bindTexture(G.TEXTURE_2D, skyTex);
       G.pixelStorei(G.UNPACK_ALIGNMENT, 4);
@@ -309,6 +356,8 @@ export function createGpuBackground(): GpuBackground | null {
       if (!haveSky || !f.ground) return;
       prepare(f); setCommon(groundProg, f);
       G.uniform1i(loc(groundProg, 'uNz'), 1);
+      G.uniform1i(loc(groundProg, 'uGrassA'), 2); G.uniform1i(loc(groundProg, 'uGrassN'), 3);
+      G.uniform1f(loc(groundProg, 'uTexReady'), texReady);
       const L = f.light;
       G.uniform1f(loc(groundProg, 'uExposure'), L.exposure);
       G.uniform1f(loc(groundProg, 'uEyeH'), f.eyeH);

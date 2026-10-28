@@ -813,3 +813,4 @@ input[type='range'].slider {
 .eye-root[data-immersive='true'][data-chrome='false'] .eye-top, .eye-root[data-immersive='true'][data-chrome='false'] .eye-dial { opacity: 0; pointer-events: none; }
 .eye-root[data-immersive='true'][data-chrome='false'] .eye-canvas { cursor: none; }
 body.eye-immersive .controls-panel, body.eye-immersive .menu-fab, body.eye-immersive .drawer-backdrop, body.eye-immersive .info-card { display: none !important; }
+.eye-slider { display: flex; flex-direction: column; gap: 3px; font-size: 12px; margin-top: 6px; }

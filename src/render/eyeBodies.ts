@@ -1,5 +1,5 @@
 import { getMoonImage, MOON_IMAGE_ROTATION_CCW_DEG } from './bodyImages';
-import { paintDomeSun } from './observerDome';
+import { directSunLight } from '../core/skyRadiance';
 import { refractionDeg } from '../core/skyModel';
 
 /**
@@ -51,6 +51,9 @@ export interface MoonPaint {
   phaseFraction: number;
   /** معامل السطوع الظاهري 0..1 بحسب تعريض المشهد (القمر نهاراً أشحب) */
   brightness: number;
+  /** الطبقة الجوية: لون الضوء المنقول (يحمرّ قرب الأفق) ونعومة الحواف */
+  tint?: [number, number, number];
+  haze?: number;
 }
 
 /** يرسم القمر المضاء بالشمس وضوء الأرض؛ يعيد false إن لم تُحمَّل الصورة بعد */
@@ -89,6 +92,12 @@ export function paintEyeMoon(ctx: CanvasRenderingContext2D, x: number, y: number
     drawAlbedo();
     g.restore();
   }
+  // الطبقة الجوية: يُضرب الضوء بنسبة النفاذية اللونية (القمر المنخفض أحمر/برتقالي)
+  if (o.tint && (o.tint[0] < 0.995 || o.tint[1] < 0.995 || o.tint[2] < 0.995)) {
+    g.save(); g.globalCompositeOperation = 'multiply';
+    g.fillStyle = `rgb(${Math.round(o.tint[0] * 255)},${Math.round(o.tint[1] * 255)},${Math.round(o.tint[2] * 255)})`;
+    g.fillRect(0, 0, size, size); g.restore();
+  }
   // قصّ بحدّ القرص
   g.save(); g.globalCompositeOperation = 'destination-in';
   g.beginPath(); g.arc(Rl, Rl, Rl - 0.25, 0, Math.PI * 2); g.fillStyle = '#000'; g.fill();
@@ -99,6 +108,9 @@ export function paintEyeMoon(ctx: CanvasRenderingContext2D, x: number, y: number
   ctx.globalAlpha = Math.max(0, Math.min(1, o.brightness));
   ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(layer, x - R, y - R, 2 * R, 2 * R);
+  // ضبابية خفيفة قرب الأفق: نسخة أكبر قليلاً وأخفت تنعّم الحافة
+  const hz = o.haze ?? 0;
+  if (hz > 0.04) { ctx.globalAlpha = Math.max(0, Math.min(1, o.brightness)) * 0.5 * hz; ctx.drawImage(layer, x - R * (1 + 0.07 * hz), y - R * (1 + 0.07 * hz), 2 * R * (1 + 0.07 * hz), 2 * R * (1 + 0.07 * hz)); }
   ctx.restore();
   return true;
 }
@@ -110,14 +122,40 @@ export function refractionFlatten(apparentAltDeg: number, radiusDeg: number): nu
   return Math.max(0.5, Math.min(1, (top - bot) / (2 * radiusDeg)));
 }
 
+const lumY = (r: number[]) => 0.2126 * r[0] + 0.7152 * r[1] + 0.0722 * r[2];
+const REF_SUN_LUM = lumY(directSunLight(60).rgb);
+const sm = (a: number, b: number, x: number) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+const enc = (v: number) => Math.round(255 * Math.pow(Math.max(0, Math.min(1, v)), 1 / 2.2));
+const mix3 = (a: number[], b: number[], t: number) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+
 /**
- * قرص الشمس: اللون والوهج من paintDomeSun (المصدر المشترك: يتغيّر بحسب الارتفاع؛ أحمر قرب الأفق وأبيض عالياً)،
- * مضغوطاً رأسياً بمعامل الانكسار على محور السمت (zenAng = اتجاه السمت على الشاشة).
+ * قرص الشمس: لونه من جدول الانتقال الجوي نفسه الذي تُحسب به السماء (directSunLight: كتلة هوائية + رايلي + هباء + أوزون):
+ * أبيض مصفرّ عالياً، ثم برتقالي فأحمر مشبع كلما اقترب من الأفق (عند 0°: 1 : 0.12 : 0.003). تعتيم الحافة، وتفلطح رأسي
+ * بالانكسار على محور السمت (zenAng). وهج الهالة من نسيج السماء (يتضمن ضوء الهباء الأمامي) فلا وهج مصطنع هنا.
  */
-export function paintEyeSun(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, altApp: number, flatten: number, zenAng: number): void {
+export function paintEyeSun(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, altApp: number, flatten: number, zenAng: number, skyRGB?: [number, number, number] | null, haze = 0): void {
+  const rgb = directSunLight(Math.max(altApp, -0.5)).rgb;
+  const m = Math.max(rgb[0], rgb[1], rgb[2]) || 1;
+  const rel = [rgb[0] / m, rgb[1] / m, rgb[2] / m];
+  const white = 0.1 + 0.8 * sm(0.05, 0.5, lumY(rgb) / REF_SUN_LUM);
+  let c0 = mix3([enc(rel[0]), enc(rel[1]), enc(rel[2])], [255, 252, 242], white);
+  // القرص هو الأسطع دائماً: سطوعه أكبر من سماء ما حوله (يُبيَّض بقدر الحاجة)
+  if (skyRGB) {
+    const need = lumY(skyRGB) * 1.12 + 26, have = lumY(c0);
+    if (have < need) c0 = mix3(c0, [255, 250, 238], Math.min(1, (need - have) / Math.max(1, 255 - have)));
+  }
+  const limb = [c0[0] * 0.9, c0[1] * 0.8, c0[2] * 0.66];
+  const css = (c: number[], a = 1) => `rgba(${Math.round(c[0])},${Math.round(c[1])},${Math.round(c[2])},${a})`;
   ctx.save();
   ctx.translate(x, y);
   ctx.rotate(zenAng); ctx.scale(flatten, 1); ctx.rotate(-zenAng);
-  paintDomeSun(ctx, 0, 0, r, altApp);
+  const glow = ctx.createRadialGradient(0, 0, r * 0.85, 0, 0, r * 2.0);
+  glow.addColorStop(0, css(c0, 0.17 + 0.1 * haze)); glow.addColorStop(1, css(c0, 0));
+  ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = glow; ctx.beginPath(); ctx.arc(0, 0, r * 2.0, 0, Math.PI * 2); ctx.fill();
+  ctx.globalCompositeOperation = 'source-over';
+  const soft = 0.97 - 0.2 * haze; // الضبابية الجوية قرب الأفق تنعّم الحافة
+  const disc = ctx.createRadialGradient(0, 0, 0, 0, 0, r * (1 + 0.04 * haze));
+  disc.addColorStop(0, css(c0)); disc.addColorStop(Math.max(0.3, soft - 0.19), css(mix3(c0, limb, 0.25))); disc.addColorStop(soft, css(limb)); disc.addColorStop(1, css(limb, 0.5 - 0.3 * haze));
+  ctx.fillStyle = disc; ctx.beginPath(); ctx.arc(0, 0, r * (1 + 0.04 * haze), 0, Math.PI * 2); ctx.fill();
   ctx.restore();
 }

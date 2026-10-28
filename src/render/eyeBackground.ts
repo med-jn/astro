@@ -2,6 +2,7 @@ import { dirFromAltAz, type Projector, type V3 } from '../core/camera';
 import { skyLinearAt, type DomeSkyInput } from './domeSky';
 import { directSunLight, SKY_CONSTANTS } from '../core/skyRadiance';
 import { createGpuBackground, type GpuBackground, type GpuFrame } from './eyeGpu';
+import { moonSkyCorrection } from '../core/atmosphere';
 
 /**
  * خلفية «عين الراصد»: سماء وأرض كلقطة كاميرا.
@@ -37,7 +38,7 @@ export function fbm(x: number, y: number, oct: number): number {
 // ───────────────────────── التعريض ومنحنى الاستجابة ─────────────────────────
 const aces = (x: number) => Math.max(0, (x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14));
 const oetf = (v: number) => { v = Math.min(1, Math.max(0, v)); return v <= 0.0031308 ? 12.92 * v : 1.055 * Math.pow(v, 1 / 2.4) - 0.055; };
-const SAT_SKY = 1.25, SAT_GROUND = 1.0;
+const SAT_SKY = 1.4, SAT_GROUND = 1.0;
 let exposure = 1e-4;
 /**
  * التعريض من الإضاءة الكلية على سطح أفقي ℓ (لوكس): بطاقة رمادية 18% تُعرَّض إلى 0.36 في الضوء الكامل (ℓ ≥ 6·10⁴)،
@@ -47,7 +48,7 @@ let exposure = 1e-4;
 function exposureFor(ell: number): number {
   const e = Math.max(ell, 1e-7);
   const dark = 0.45 + 0.55 * smoothstep(0.003, 0.2, e); // ليل بلا قمر: لا تُرفع زرقة السماء الخافتة
-  const x = 0.36 * Math.pow(Math.min(1, e / 6e4), 0.25) * dark;
+  const x = 0.46 * Math.pow(Math.min(1, e / 6e4), 0.25) * dark;
   return x / ((0.18 * e) / Math.PI);
 }
 /** إشعاع خطي (cd/m²) → بايتات sRGB بعد التعريض والتشبّع والمنحنى */
@@ -144,15 +145,26 @@ export function buildSkyTexture(inp: DomeSkyInput, version: number, nowMs: numbe
   const laSky = Math.exp((0.7 * lgSkyRef + 0.3 * lgSky) / probes.length);
   exposure = Math.min(exposure, 0.11 / laSky);
   // سقف سطوع الهالة حول الشمس (لا تنفجر إلى بياض يبتلع القرص)
-  skyCapY = 14 * laSky;
+  skyCapY = 5.5 * laSky;
   const tot = [E[0] + sunE[0] * sinS + moonE[0] * sinM, E[1] + sunE[1] * sinS + moonE[1] * sinM, E[2] + sunE[2] * sinS + moonE[2] * sinM];
   shadowKValue = Math.max(0.04, Math.min(1, lumY(E) / Math.max(1e-9, lumY(tot))));
   void tmp4;
 
+  // مرجع السماء المظلمة بلا قمر (اتجاه مقابل للقمر)، لتحديد جزء القمر
+  const moonCorr = inp.sunAlt < -12 && inp.moonAlt > -6 && inp.moonPhase > 0.02;
+  let darkRef = 2.2e-4;
+  if (moonCorr) { skyLinearAt(Math.max(8, 60 - Math.max(0, inp.moonAlt)), inp.moonAz + 180, inp.sunAz, inp.moonAz, inp.sunFraction, acc3); darkRef = Math.min(lumY(acc3), 6e-4); }
   for (let j = 0; j < ELN; j++) {
     const e = elOf(j);
     for (let i = 0; i < AZN; i++) {
       skyLinearAt(e, (i * 360) / AZN, inp.sunAz, inp.moonAz, inp.sunFraction, acc3);
+      if (moonCorr) { // ليل صافٍ: جزء القمر وحده يُصحَّح بحسب البعد الزاوي عن القمر (KS91)
+        const yy = lumY(acc3);
+        const dm = Math.sin(e * DEG) * Math.sin(inp.moonAlt * DEG) + Math.cos(e * DEG) * Math.cos(inp.moonAlt * DEG) * Math.cos(((i * 360) / AZN - inp.moonAz) * DEG);
+        const rho = (Math.acos(Math.max(-1, Math.min(1, dm))) * 180) / Math.PI;
+        const part = Math.max(0, yy - darkRef);
+        if (yy > 0) { const k2 = (darkRef + part * moonSkyCorrection(rho)) / yy; acc3[0] *= k2; acc3[1] *= k2; acc3[2] *= k2; }
+      }
       const capK = 1 / (1 + lumY(acc3) / skyCapY);
       toCameraRGB(acc3[0] * capK, acc3[1] * capK, acc3[2] * capK, skyTex, (j * AZN + i) * 4);
       skyTex[(j * AZN + i) * 4 + 3] = 255;
@@ -180,7 +192,7 @@ export interface BgOptions { ground: boolean; eyeHeightM: number }
 
 // ألبيدو (ρ) لكل مادة
 const RHO_SOIL = [0.17, 0.135, 0.095], RHO_DRY = [0.15, 0.13, 0.085], RHO_GRASS = [0.085, 0.1, 0.045], RHO_GRAVEL = [0.2, 0.19, 0.17];
-const RHO_STONE = [0.36, 0.345, 0.315];
+const RHO_STONE = [0.3, 0.29, 0.265];
 const RHO_FAR = [0.085, 0.1, 0.12], RHO_NEAR = [0.045, 0.07, 0.03];
 const lit = [0, 0, 0];
 /** إشعاع الأرض لمادة ألبيدو ρ وناظم n */
@@ -334,6 +346,8 @@ let lastFrame: GpuFrame | null = null;
 /** للاختبار: تعطيل المسار على كرت الشاشة */
 export function setGpuEnabled(v: boolean): void { gpuEnabled = v; }
 export const isUsingGpu = () => usingGpu;
+/** يتغيّر عند اكتمال تحميل أنسجة الأرض (لإعادة الرسم) */
+export const getGpuStamp = () => (gpu ? gpu.ready() : 0);
 
 export function paintSkyBackground(ctx: CanvasRenderingContext2D, P: Projector, opt: BgOptions, plate: BgPlate, scale: number): void {
   if (gpuEnabled && gpu === undefined) gpu = createGpuBackground();
@@ -362,4 +376,11 @@ export function paintGroundLayer(ctx: CanvasRenderingContext2D, P: Projector): v
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'medium';
   ctx.drawImage(groundBuf.canvas, 0, 0, P.w, P.h);
+}
+
+/** لون السماء الحالي (sRGB 0..255) باتجاه معيّن، أو null قبل بناء النسيج */
+export function skyColorAt(altDeg: number, azDeg: number): [number, number, number] | null {
+  if (!skyTex) return null;
+  const o = [0, 0, 0]; sampleSky(Math.max(0, altDeg), azDeg, o);
+  return [o[0], o[1], o[2]];
 }

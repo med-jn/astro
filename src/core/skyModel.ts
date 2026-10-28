@@ -69,13 +69,23 @@ export function makeSkyFrame(time: Astronomy.AstroTime, observer: SkyObserver): 
 }
 
 /** انكسار الجو بالدرجات لارتفاع حقيقي (هندسي) — مطابق حرفياً لـ Astronomy.Refraction('normal') */
-export function refractionDeg(trueAltDeg: number): number {
+/** معامل الانكسار العام: نسبة معامل انكسار الهواء الحالي إلى القياسي (1010 hPa، 10°م)؛ 1 = قياسي. يضبطه core/atmosphere */
+/** نسبة معامل الانخماد (قدر/كتلة هوائية) إلى الافتراضي 0.2؛ يضبطها core/atmosphere من العمق البصري الكلي */
+let extinctionScale = 1;
+export const setExtinctionScale = (k: number) => { extinctionScale = k; };
+export const getExtinctionScale = () => extinctionScale;
+let refractionScale = 1;
+export const setRefractionScale = (k: number) => { refractionScale = k; };
+export const getRefractionScale = () => refractionScale;
+/** Sæmundsson (ارتفاع حقيقي)، جو قياسي: R = 1.02 / tan(h + 10.3/(h + 5.11)) دقيقة قوسية */
+export function refractionDegStd(trueAltDeg: number): number {
   if (trueAltDeg < -90 || trueAltDeg > 90) return 0;
   const hd = trueAltDeg < -1 ? -1 : trueAltDeg;
   let r = 1.02 / Math.tan((hd + 10.3 / (hd + 5.11)) * DEG) / 60;
   if (trueAltDeg < -1) r *= (trueAltDeg + 90) / 89;
   return r;
 }
+export function refractionDeg(trueAltDeg: number): number { return refractionDegStd(trueAltDeg) * refractionScale; }
 
 /** يحوّل متجه J2000 إلى ارتفاع ظاهري (بعد الانكسار) وسمت (من الشمال نحو الشرق) */
 export function placeJ2000(frame: SkyFrame, v: ArrayLike<number>, i = 0): { altDeg: number; azDeg: number; altGeomDeg: number } {
@@ -175,7 +185,7 @@ export function limitingMagnitude(sunAltDeg: number, moon?: { altDeg: number; ph
 /** شفافية نجمة (0..1) من قدرها وارتفاعها الظاهري والقدر المحدِّد: تخفت قرب الأفق (إخماد ~0.2 قدر لكل كتلة هوائية) */
 export function starAlpha(mag: number, altApparentDeg: number, limitMag: number): number {
   if (altApparentDeg < -0.6) return 0;
-  const eff = mag + 0.2 * (airmass(altApparentDeg) - 1);
+  const eff = mag + 0.2 * extinctionScale * (airmass(altApparentDeg) - 1);
   const a = (limitMag - eff + 0.6) / 1.6;
   return a <= 0 ? 0 : a >= 1 ? 1 : a;
 }

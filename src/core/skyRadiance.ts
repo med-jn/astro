@@ -19,21 +19,21 @@
 const DEG = Math.PI / 180;
 const R_E = 6371; // كم
 const TOP = 100; // كم: قمة الغلاف المؤثر
-const H_R = 8;
+let H_R = 8;
 const H_M = 1.2;
 const OZONE_Z = 25;
 const OZONE_S = 7;
 
 /** أطوال الموجة (µm) للقنوات أحمر/أخضر/أزرق */
 const LAMBDA = [0.64, 0.55, 0.46];
-const TAU_R0 = LAMBDA.map((l) => 0.008569 * Math.pow(l, -4) * (1 + 0.0113 * Math.pow(l, -2) + 0.00013 * Math.pow(l, -4)));
+let TAU_R0 = LAMBDA.map((l) => 0.008569 * Math.pow(l, -4) * (1 + 0.0113 * Math.pow(l, -2) + 0.00013 * Math.pow(l, -4)));
 /** عمق بصري رأسي للهباء عند 550nm: جو صافٍ (≈0.06). الهباء الأكبر يُبيّض الأزرق ويُغني الأفق */
-export const AEROSOL_TAU_550 = 0.06;
-const TAU_M0 = LAMBDA.map((l) => AEROSOL_TAU_550 * Math.pow(0.55 / l, 1.3));
+export let AEROSOL_TAU_550 = 0.06;
+let TAU_M0 = LAMBDA.map((l) => AEROSOL_TAU_550 * Math.pow(0.55 / l, 1.3));
 const OMEGA_M = 0.92;
 const G_M = 0.76;
 /** أوزون 300 DU: امتصاص شابويس (أحمر/أخضر) شبه معدوم في الأزرق */
-const TAU_O0 = [0.033, 0.032, 0.0045];
+let TAU_O0 = [0.033, 0.032, 0.0045];
 
 /** إضاءة الشمس خارج الغلاف (lux) وتوزيعها اللوني الأبيض-الدافئ */
 const E_SUN = 1.27e5;
@@ -45,7 +45,40 @@ const ozoneDensity = (z: number) => Math.exp(-0.5 * ((z - OZONE_Z) / OZONE_S) **
 const Z_GRID = [0, 0.5, 1, 2, 3, 4.5, 6, 8, 10, 13, 16, 20, 25, 32, 45, 70, 100];
 const H_GRID = [-14, -12, -10, -8, -7, -6, -5, -4, -3, -2.5, -2, -1.5, -1, -0.5, 0, 0.5, 1, 1.5, 2, 3, 4, 5, 6, 8, 10, 13, 17, 22, 30, 40, 55, 70, 90];
 const BLOCKED_TAU = 60;
+/** العمق البصري الرأسي الكلي عند 550 نم (رايلي + هباء + أوزون) — الافتراضي مأخوذ قبل أي ضبط */
+const DEFAULT_TAU_G = TAU_R0[1] + TAU_M0[1] + TAU_O0[1];
+export const extinctionTauGreen = () => TAU_R0[1] + TAU_M0[1] + TAU_O0[1];
+export const extinctionTauGreenDefault = () => DEFAULT_TAU_G;
 let lut: Float32Array | null = null;
+
+/**
+ * معاملات الغلاف الجوي القابلة للضبط. القيم الافتراضية تعيد النموذج الأصلي بدقة (أُسّ أنغستروم 1.3، عمق الهباء 0.06، أوزون 300 DU،
+ * ضغط 1013.25، ارتفاع الارتفاع القياسي لرايلي 8 كم عند 15°م).
+ *  - الضغط: عمق رايلي ∝ P/1013.25 (Hansen & Travis).
+ *  - الحرارة: ارتفاع الغلاف الرايلي ∝ T (H = R·T/(M·g)؛ 8 كم ↔ 288.15 ك).
+ *  - الهباء: τ_a(λ) = AOD550·(0.55/λ)^α، مضروباً بنمو الرطوبة f(RH) = [(100−RH0)/(100−RH)]^γ (Kasten et al. 1969؛ RH0 = 40%).
+ *    γ تُقاس موقعياً: القيمة الافتراضية 0.4 **غير محقَّقة** وهي معامل صريح.
+ *  - الأوزون: يتناسب خطياً مع DU.
+ */
+export interface SkyAtmosphere { pressureHPa: number; temperatureC: number; aod550: number; angstrom: number; ozoneDU: number; relHumidityPct: number; growthGamma: number }
+export const DEFAULT_SKY_ATMOSPHERE: SkyAtmosphere = { pressureHPa: 1013.25, temperatureC: 15, aod550: 0.06, angstrom: 1.3, ozoneDU: 300, relHumidityPct: 40, growthGamma: 0.4 };
+const RH_REF = 40;
+let atmVersion = 0;
+let currentAtm: SkyAtmosphere = { ...DEFAULT_SKY_ATMOSPHERE };
+export const skyAtmosphereVersion = () => atmVersion;
+export const getSkyAtmosphere = (): SkyAtmosphere => ({ ...currentAtm });
+export function setSkyAtmosphere(p: Partial<SkyAtmosphere>): void {
+  currentAtm = { ...currentAtm, ...p };
+  const c = currentAtm;
+  H_R = 8 * ((c.temperatureC + 273.15) / 288.15);
+  const growth = Math.pow((100 - RH_REF) / Math.max(1, 100 - Math.min(99, c.relHumidityPct)), c.growthGamma);
+  AEROSOL_TAU_550 = c.aod550 * growth;
+  TAU_R0 = LAMBDA.map((l) => (c.pressureHPa / 1013.25) * 0.008569 * Math.pow(l, -4) * (1 + 0.0113 * Math.pow(l, -2) + 0.00013 * Math.pow(l, -4)));
+  TAU_M0 = LAMBDA.map((l) => AEROSOL_TAU_550 * Math.pow(0.55 / l, c.angstrom));
+  TAU_O0 = [0.033, 0.032, 0.0045].map((v) => v * (c.ozoneDU / 300));
+  lut = null;
+  atmVersion++;
+}
 
 /** تكامل العمق البصري على شعاع من ارتفاع zKm بزاوية hDeg حتى قمة الغلاف (بلا منطق ظل) */
 function integrateTau(zKm: number, hDeg: number, out: number[]) {

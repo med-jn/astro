@@ -23,6 +23,7 @@ import { useEyeStore, type LookKind } from '../state/eye';
 import { ShortcutsGuide } from './ShortcutsGuide';
 import { OPEN_SHORTCUTS_EVENT } from './GlobalShortcuts';
 import { fovLimits, type ProjectionKind } from '../core/camera';
+import type { AtmosphereParams } from '../core/atmosphere';
 
 /* ------------------------------------------------------------------ */
 /*  ثوابت                                                               */
@@ -45,6 +46,12 @@ const EYE_LOOKS: [LookKind, TKey][] = [
   ['south', 'eye_dir_s'], ['west', 'eye_dir_w'], ['zenith', 'eye_look_zenith'], ['dial', 'eye_look_dial'],
 ];
 const EYE_PROJECTIONS: ProjectionKind[] = ['stereographic', 'perspective', 'equidistant'];
+// معايرات الغلاف الجوي (توضيحية) وحقول التحكم: [المفتاح، النص، أدنى، أعلى، الخطوة]
+const ATM_PRESET_KEYS: [string, TKey][] = [['standard', 'eye_atm_p_std'], ['hot_humid', 'eye_atm_p_hot'], ['cold_dry', 'eye_atm_p_dry'], ['dust', 'eye_atm_p_dust'], ['high_clear', 'eye_atm_p_high']];
+const ATM_FIELDS: [keyof AtmosphereParams, TKey, number, number, number][] = [
+  ['temperatureC', 'eye_atm_temp', -40, 50, 1], ['pressureHPa', 'eye_atm_pressure', 500, 1100, 1], ['relativeHumidityPct', 'eye_atm_rh', 0, 100, 1],
+  ['aod550', 'eye_atm_aod', 0, 1.5, 0.01], ['ozoneDU', 'eye_atm_ozone', 200, 500, 5],
+];
 
 const JUMP_PHASES = [0, 90, 180, 270] as const; // محاق، تربيع أول، بدر، تربيع أخير
 
@@ -84,7 +91,7 @@ function ControlsPanelImpl() {
     useShallow((s) => ({ isPlaying: s.isPlaying, speedIndex: s.speedIndex, observer: s.observer, layers: s.layers, timeZoneKind: s.timeZoneKind, selectedZodiacs: s.selectedZodiacs, selectedMansionIndices: s.selectedMansionIndices, setDate: s.setDate, togglePlay: s.togglePlay, resetToNow: s.resetToNow, setSpeedIndex: s.setSpeedIndex, setObserver: s.setObserver, toggleLayer: s.toggleLayer, toggleZodiacSelection: s.toggleZodiacSelection, clearZodiacSelection: s.clearZodiacSelection, toggleMansionSelection: s.toggleMansionSelection, clearMansionSelection: s.clearMansionSelection, setTimeZoneKind: s.setTimeZoneKind, auroraKp: s.auroraKp, setAuroraKp: s.setAuroraKp })),
   );
 
-  const eye = useEyeStore(useShallow((s) => ({ open: s.open, projection: s.projection, ground: s.ground, sundial: s.sundial, altAzGrid: s.altAzGrid, fovDeg: s.fovDeg, track: s.track, solarFilter: s.solarFilter, immersive: s.immersive })));
+  const eye = useEyeStore(useShallow((s) => ({ open: s.open, projection: s.projection, ground: s.ground, sundial: s.sundial, altAzGrid: s.altAzGrid, fovDeg: s.fovDeg, track: s.track, solarFilter: s.solarFilter, immersive: s.immersive, atmosphere: s.atmosphere })));
   const trackZodiacs = useSimulationStore((s) => s.selectedZodiacs);
   const trackStar = useSimulationStore((s) => s.highlightedStarId);
   const trackIs = (k: string, extra?: string) => !!eye.track && eye.track.kind === k && (extra === undefined || ('name' in eye.track ? eye.track.name === extra : 'key' in eye.track ? eye.track.key === extra : true));
@@ -358,6 +365,26 @@ function ControlsPanelImpl() {
                         <input type="range" className="eye-range" min={0} max={1000} aria-label={t('eye_fov')}
                           value={Math.round((Math.log(eye.fovDeg / fovLo) / Math.log(fovHi / fovLo)) * 1000)}
                           onChange={(e: { target: { value: string } }) => useEyeStore.getState().setFov(fovLo * Math.pow(fovHi / fovLo, Number(e.target.value) / 1000))} />
+                        <div className="eye-chips">
+                          {[0.5, 1, 4, 16, 64].map((m) => (
+                            <button key={m} className="eye-btn" title={m === 1 ? t('eye_mag_natural') : undefined} onClick={() => useEyeStore.getState().setMagnification(m)}>×{m}</button>
+                          ))}
+                        </div>
+                      </Section>
+                      <Section title={t('eye_atm')}>
+                        <div className="eye-chips">
+                          {ATM_PRESET_KEYS.map(([k, label]) => (
+                            <button key={k} className="eye-btn" onClick={() => useEyeStore.getState().setAtmospherePreset(k)}>{t(label)}</button>
+                          ))}
+                        </div>
+                        {ATM_FIELDS.map(([key, label, min, max, step]) => (
+                          <label key={key} className="eye-slider">
+                            <span>{t(label)} <b className="eye-mono">{eye.atmosphere[key]}</b></span>
+                            <input type="range" className="eye-range" min={min} max={max} step={step} value={eye.atmosphere[key]}
+                              onChange={(e: { target: { value: string } }) => useEyeStore.getState().setAtmosphere({ [key]: Number(e.target.value) })} />
+                          </label>
+                        ))}
+                        <p className="sc-note">{t('eye_atm_note')}</p>
                       </Section>
                       <Section title={t('eye_layers')}>
                         <SwitchRow icon={Globe2} label={t('eye_opt_ground')} checked={eye.ground} onChange={() => useEyeStore.getState().toggle('ground')} />

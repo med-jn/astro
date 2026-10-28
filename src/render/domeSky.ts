@@ -1,4 +1,4 @@
-import { addSkyRadiance, makeMoonLight, makeSunLight } from '../core/skyRadiance';
+import { addSkyRadiance, makeMoonLight, makeSunLight, skyAtmosphereVersion } from '../core/skyRadiance';
 import { refractionDeg } from '../core/skyModel';
 
 /**
@@ -178,7 +178,11 @@ function sampleTab(tab: Float32Array, e: number, d: number, scale: number, out: 
  * يجهّز جداول الإشعاع للشمس والقمر (يُعاد بناؤها عند تغيّر محسوس وبحدّ زمني) ويعيد رقم نسخة تتغير عند إعادة البناء.
  * مشتركة بين القبة وعين الراصد: كلتاهما تقرأ الجداول عبر skyLinearAt.
  */
+let lastAtmVer = 0;
+let tabForce = false;
 export function ensureSkyTables(inp: DomeSkyInput, nowMs: number): number {
+  const av = skyAtmosphereVersion();
+  if (av !== lastAtmVer) { lastAtmVer = av; sunTab = null; sunTabAlt = NaN; moonTab = null; moonTabKey = ''; tabForce = true; }
   const sunGeom = inp.sunAlt - refractionDeg(Math.max(inp.sunAlt, -1));
   const moonGeom = inp.moonAlt - refractionDeg(Math.max(inp.moonAlt, -1));
   const needSun = sunGeom > -22;
@@ -188,7 +192,8 @@ export function ensureSkyTables(inp: DomeSkyInput, nowMs: number): number {
   // إعادة بناء الجداول: عند تغيّر محسوس، وبحدّ ≥ 90ms بين عمليتين (التشغيل المتسارع لا يُثقَل)
   const sunChanged = needSun && (sunTab === null || Math.abs(sunGeom - sunTabAlt) > 0.12);
   const moonChanged = needMoon ? moonKey !== moonTabKey : moonTab !== null && moonTabKey !== '';
-  if ((sunChanged || moonChanged || (!needSun && sunTab)) && (nowMs - tabStamp > 90 || tabVersion === 0 || (needSun && sunTab === null))) {
+  if ((sunChanged || moonChanged || (!needSun && sunTab)) && (nowMs - tabStamp > 90 || tabVersion === 0 || (needSun && sunTab === null) || tabForce)) {
+    tabForce = false;
     if (needSun) { sunTab = buildSunTable(sunGeom); sunTabAlt = sunGeom; } else { sunTab = null; sunTabAlt = NaN; }
     if (needMoon) { moonTab = buildMoonTable(moonGeom, inp.moonPhase); moonTabKey = moonKey; } else { moonTab = null; moonTabKey = ''; }
     tabStamp = nowMs; tabVersion++;

@@ -20,13 +20,13 @@ export interface Camera {
 }
 
 /** عين الراصد: منظوري (الأفق مستقيم كما تراه العين)، متجهاً جنوباً بمجال 70° */
-export const DEFAULT_CAMERA: Camera = { azDeg: 180, altDeg: 12, rollDeg: 0, fovDeg: 70, projection: 'perspective' };
+export const DEFAULT_CAMERA: Camera = { azDeg: 180, altDeg: 12, rollDeg: 0, fovDeg: 46, projection: 'perspective' };
 
 const DEG = Math.PI / 180;
 const FOV_LIMITS: Record<ProjectionKind, [number, number]> = {
-  stereographic: [0.25, 220],
-  perspective: [0.25, 140],
-  equidistant: [0.25, 360],
+  stereographic: [0.05, 220],
+  perspective: [0.05, 100], // أوسع من ذلك يمطّ الأطراف (عدسة بزاوية فائقة)؛ للمجال الأوسع استعمل المجسّم
+  equidistant: [0.05, 360],
 };
 export const fovLimits = (p: ProjectionKind) => FOV_LIMITS[p];
 

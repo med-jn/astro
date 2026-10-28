@@ -1,0 +1,9 @@
+محرك الغلاف الجوي (الخطوة 1). انسخ فوق المشروع (تشمل كل ما سبق).
+معدَّل  src/core/atmosphere.ts    الانكسار (Bennett/Sæmundsson) + معامل Edlén (حرارة/ضغط/رطوبة/طول موجي) + التشتت + نموذج أثر الأفق + applyAtmosphere + معايرات
+معدَّل  src/core/skyRadiance.ts   ثوابت قابلة للضبط (ضغط، حرارة، هباء+نمو رطوبة، أوزون) — الافتراضي يعيد الإخراج الحالي بالضبط
+معدَّل  src/core/skyModel.ts      refractionDeg يقرأ معامل الانكسار العام؛ انخماد النجوم 0.2·scale
+معدَّل  src/render/domeSky.ts     إبطال جداول السماء عند تغيّر الغلاف الجوي
+معدَّل  src/render/eyeRenderer.ts انكسار المستخدم على الشمس والقمر والكواكب
+معدَّل  src/state/eye.ts, ControlsPanel.tsx, ObserverView.tsx, i18n/ar.ts, en.ts, index.css   قسم «الغلاف الجوي» (5 معايرات + 5 منزلقات)
+معدَّل  tests/atmosphere.test.ts  12 اختباراً؛ docs/CALIBRATION.md فيه ما حُقّق وما لم يُحقّق
+ملاحظة: الغلاف الجوي عام للتطبيق (يؤثر على القبة أيضاً).
